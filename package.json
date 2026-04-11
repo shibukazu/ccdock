@@ -1,0 +1,48 @@
+{
+  "name": "ccdock",
+  "version": "0.1.0",
+  "description": "A TUI sidebar to orchestrate VS Code windows and track Claude Code agents.",
+  "type": "module",
+  "bin": {
+    "ccdock": "src/main.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "build": "bun build --compile src/main.ts --outfile ccdock",
+    "typecheck": "bunx tsc --noEmit",
+    "format": "bunx @biomejs/biome format --write src/"
+  },
+  "keywords": [
+    "claude-code",
+    "worktree",
+    "git",
+    "tui",
+    "sidebar",
+    "vscode",
+    "terminal"
+  ],
+  "author": "shibutani",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shibukazu/ccdock"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "os": [
+    "darwin"
+  ],
+  "files": [
+    "src/**/*.ts",
+    "LICENSE",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@biomejs/biome": "^1.9.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

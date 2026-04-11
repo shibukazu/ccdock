@@ -1,0 +1,65 @@
+#!/usr/bin/env bun
+import { handleHook } from "./agent/hook.ts";
+import { runSidebar } from "./sidebar.ts";
+
+function printHelp(): void {
+	const help = `
+ccdock - TUI sidebar for managing git worktree development sessions
+
+USAGE:
+  ccdock [command]
+
+COMMANDS:
+  start       Start the sidebar TUI (default)
+  hook        Handle agent hook events (called by Claude Code hooks)
+  help        Show this help message
+
+HOOK USAGE:
+  ccdock hook <agent-type> <event-name>
+
+  Agent types: claude-code, codex
+  Events: PreToolUse, PostToolUse, Stop, session.end, Notification
+
+KEYBINDINGS (sidebar):
+  j/k         Navigate sessions
+  Enter/Tab   Focus editor window for selected session
+  n           Create new session (wizard)
+  d           Delete session
+  c           Toggle compact mode
+  l           Toggle activity log
+  q/Ctrl+C    Quit sidebar
+
+CONFIG:
+  ~/.config/ccdock/config.json
+
+STATE:
+  ~/.local/state/ccdock/
+`.trim();
+
+	console.log(help);
+}
+
+async function main(): Promise<void> {
+	const [command, ...args] = process.argv.slice(2);
+
+	switch (command) {
+		case "start":
+		case undefined:
+			await runSidebar();
+			break;
+		case "hook":
+			await handleHook(args[0] ?? "claude-code", args[1] ?? "unknown");
+			break;
+		case "help":
+		case "--help":
+		case "-h":
+			printHelp();
+			break;
+		default:
+			console.error(`Unknown command: ${command}`);
+			printHelp();
+			process.exit(1);
+	}
+}
+
+await main();

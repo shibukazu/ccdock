@@ -1,6 +1,11 @@
 #!/usr/bin/env bun
 import { handleHook } from "./agent/hook.ts";
 import { runSidebar } from "./sidebar.ts";
+import pkg from "../package.json" with { type: "json" };
+
+function printVersion(): void {
+	console.log(`ccdock ${pkg.version}`);
+}
 
 function printHelp(): void {
 	const help = `
@@ -12,6 +17,7 @@ USAGE:
 COMMANDS:
   start       Start the sidebar TUI (default)
   hook        Handle agent hook events (called by Claude Code hooks)
+  version     Show version number
   help        Show this help message
 
 HOOK USAGE:
@@ -49,6 +55,11 @@ async function main(): Promise<void> {
 			break;
 		case "hook":
 			await handleHook(args[0] ?? "claude-code", args[1] ?? "unknown");
+			break;
+		case "version":
+		case "--version":
+		case "-v":
+			printVersion();
 			break;
 		case "help":
 		case "--help":

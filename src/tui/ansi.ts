@@ -44,7 +44,8 @@ export const COLORS = {
 	editorFocused: fg256(255), // bright white — focused editor
 	editorOpen: fg256(117), // cyan — open but not focused
 	editorClosed: fg256(240), // dark gray — closed
-	borderFocused: fg256(255), // bright white border
+	borderFocused: fg256(255), // bright white border — VS Code window focused
+	borderSelected: fg256(75), // soft blue border — J/K cursor selection
 	borderOpen: fg256(248), // light gray border
 	borderClosed: fg256(235), // very dark border
 } as const;

@@ -20,6 +20,16 @@ async function runOsascript(script: string): Promise<string> {
 	return out.trim();
 }
 
+async function runJXA(script: string): Promise<string> {
+	const proc = Bun.spawn(["osascript", "-l", "JavaScript", "-e", script], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const out = await new Response(proc.stdout).text();
+	await proc.exited;
+	return out.trim();
+}
+
 /**
  * Get the bounds of the sidebar terminal window (the frontmost Ghostty window).
  */
@@ -44,27 +54,63 @@ end tell
 }
 
 /**
- * Get the screen bounds that the sidebar is on.
- * Returns the full screen dimensions for the monitor containing the sidebar.
+ * Get the right edge (x coordinate) of the screen containing the sidebar window.
+ * Uses JXA + NSScreen with proper coordinate conversion for multi-monitor setups.
+ *
+ * Coordinate systems:
+ *   NSScreen: origin at bottom-left of primary display, y increases upward.
+ *             Screens to the left have negative x.
+ *   AppleScript: origin at top-left of primary display, y increases downward.
+ *             x=0 is the left edge of the leftmost monitor.
+ *
+ * Conversions (using primaryH = height of primary NSScreen):
+ *   nsX = asX + nsMinX          (nsMinX = min x across all NSScreens)
+ *   nsY = primaryH - asCenterY  (Y axis is flipped)
  */
-export async function getScreenBounds(): Promise<WindowBounds | null> {
+async function getScreenRightEdge(sidebar: WindowBounds): Promise<number> {
+	// Fallback: typical MacBook Pro screen width from the sidebar's right edge
+	const fallback = 1512;
 	try {
-		const result = await runOsascript(`
-tell application "Finder"
-	set db to bounds of window of desktop
-	return "" & (item 1 of db) & "," & (item 2 of db) & "," & (item 3 of db) & "," & (item 4 of db)
-end tell
+		// Use the window center for a more robust screen hit-test
+		const asCenterX = sidebar.x + sidebar.width / 2;
+		const asCenterY = sidebar.y + sidebar.height / 2;
+		const result = await runJXA(`
+ObjC.import("AppKit");
+var asCenterX = ${asCenterX};
+var asCenterY = ${asCenterY};
+var screens = $.NSScreen.screens;
+var count = screens.count;
+var primaryH = $.NSScreen.mainScreen.frame.size.height;
+// NSScreen always places the primary display at x=0, same as AppleScript.
+// So AS.x == NS.x (no x offset needed).
+// Only Y is flipped: nsY = primaryH - asY.
+var nsX = asCenterX;
+var nsY = primaryH - asCenterY;
+// Find screen whose bounds contain the converted center point
+var found = false;
+var result = 1512;
+for (var i = 0; i < count; i++) {
+    var s = screens.objectAtIndex(i);
+    var left = s.frame.origin.x;
+    var bottom = s.frame.origin.y;
+    var width = s.frame.size.width;
+    var height = s.frame.size.height;
+    if (left <= nsX && nsX < left + width && bottom <= nsY && nsY < bottom + height) {
+        result = Math.round(left + width);
+        found = true;
+        break;
+    }
+}
+if (!found) {
+    var main = $.NSScreen.mainScreen;
+    result = Math.round(main.frame.origin.x + main.frame.size.width);
+}
+result;
 `);
-		const parts = result.split(",").map((s) => Number.parseInt(s.trim(), 10));
-		if (parts.length < 4) return null;
-		return {
-			x: parts[0]!,
-			y: parts[1]!,
-			width: parts[2]! - parts[0]!,
-			height: parts[3]! - parts[1]!,
-		};
+		const value = Number.parseInt(result, 10);
+		return Number.isNaN(value) || value <= 0 ? fallback : value;
 	} catch {
-		return null;
+		return fallback;
 	}
 }
 
@@ -80,10 +126,8 @@ export async function positionEditorWindow(
 	// Calculate editor position: right of sidebar, same height
 	const editorX = sidebarBounds.x + sidebarBounds.width + 4; // 4px gap
 	const editorY = sidebarBounds.y;
-	// Editor width: fill remaining screen width (estimate with a large number)
-	// We'll get the actual screen width for precision
-	const screen = await getScreenBounds();
-	const screenRight = screen ? screen.x + screen.width : 5120; // fallback
+	// Editor width: fill remaining space on the screen containing the sidebar
+	const screenRight = await getScreenRightEdge(sidebarBounds);
 	const editorWidth = screenRight - editorX;
 	const editorHeight = sidebarBounds.height;
 
@@ -292,27 +336,43 @@ end tell
 }
 
 /**
- * Reposition ALL VS Code windows to fill the area right of the sidebar.
+ * Reposition managed VS Code windows to fill the area right of the sidebar.
+ * Only windows whose title contains one of the managed titles are repositioned.
  * Called when the sidebar terminal is resized.
  */
-export async function repositionAllEditors(): Promise<void> {
-	if (!(await isEditorRunning())) return;
-	const [sidebar, screen] = await Promise.all([getSidebarBounds(), getScreenBounds()]);
-	if (!sidebar) return;
+export async function repositionAllEditors(managedTitles: string[]): Promise<void> {
+	if (managedTitles.length === 0) return;
+	const [running, sidebar] = await Promise.all([isEditorRunning(), getSidebarBounds()]);
+	if (!running || !sidebar) return;
 
 	try {
 		const editorX = sidebar.x + sidebar.width + 4;
 		const editorY = sidebar.y;
-		const screenRight = screen ? screen.x + screen.width : 5120;
+		const screenRight = await getScreenRightEdge(sidebar);
 		const editorWidth = screenRight - editorX;
 		const editorHeight = sidebar.height;
+
+		const titlesAppleScript = managedTitles
+			.map((t) => `"${t.replace(/"/g, '\\"')}"`)
+			.join(", ");
 
 		await runOsascript(`
 tell application "System Events"
 	tell process "Code"
+		set managedTitles to {${titlesAppleScript}}
 		repeat with w in every window
-			set position of w to {${editorX}, ${editorY}}
-			set size of w to {${editorWidth}, ${editorHeight}}
+			set wName to name of w
+			set isManaged to false
+			repeat with t in managedTitles
+				if wName contains t then
+					set isManaged to true
+					exit repeat
+				end if
+			end repeat
+			if isManaged then
+				set position of w to {${editorX}, ${editorY}}
+				set size of w to {${editorWidth}, ${editorHeight}}
+			end if
 		end repeat
 	end tell
 end tell

@@ -35,11 +35,9 @@ function padRight(str: string, len: number): string {
 	return str + " ".repeat(len - visible);
 }
 
-function renderDeleteConfirm(deleteConfirm: DeleteConfirm, cols: number): string[] {
+function renderDeleteConfirm(deleteConfirm: DeleteConfirm): string[] {
 	const lines: string[] = [];
-	const width = Math.max(cols - 6, 16);
 
-	lines.push(`  ${COLORS.border}${BOX.horizontal.repeat(width)}${RESET}`);
 	lines.push(`  ${BOLD}${COLORS.error} Delete session?${RESET}`);
 	lines.push("");
 
@@ -58,7 +56,6 @@ function renderDeleteConfirm(deleteConfirm: DeleteConfirm, cols: number): string
 
 	lines.push("");
 	lines.push(`  ${COLORS.muted}Enter: confirm | Esc: cancel${RESET}`);
-	lines.push(`  ${COLORS.border}${BOX.horizontal.repeat(width)}${RESET}`);
 
 	return lines;
 }
@@ -74,8 +71,6 @@ function renderCard(
 ): string[] {
 	const lines: string[] = [];
 	const width = Math.max(cols - 2, 20);
-	const bg = isSelected ? COLORS.bgSelected : "";
-	const resetBg = isSelected ? RESET : "";
 
 	// Colors based on editor state
 	// Focused: white border, normal title
@@ -85,11 +80,14 @@ function renderCard(
 	const isFocused = editorState === "focused";
 	const isClosed = editorState === "closed";
 	const isLaunching = editorState === "launching";
+	// Border color: VS Code focused > J/K selected > closed/open
 	const borderColor = isFocused
 		? COLORS.borderFocused
-		: isClosed
-			? COLORS.borderClosed
-			: COLORS.border;
+		: isSelected
+			? COLORS.borderSelected
+			: isClosed
+				? COLORS.borderClosed
+				: COLORS.border;
 	const titleColor = isClosed ? COLORS.editorClosed : COLORS.title;
 	const detailColor = isClosed ? COLORS.editorClosed : COLORS.subtitle;
 	const dimAll = isClosed ? DIM : "";
@@ -113,7 +111,7 @@ function renderCard(
 	const titleText = `${titleColor}${icon} ${session.repoName}:${session.branch}${RESET}`;
 	const title = `${sessionNum}${openDot}${titleText}`;
 	const titleTruncated = truncate(title, width - 4);
-	const titleLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${bg}${padRight(titleTruncated, width - 4)}${resetBg}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+	const titleLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(titleTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 	lines.push(titleLine);
 
 	if (!compact) {
@@ -121,13 +119,13 @@ function renderCard(
 		const shortPath = shortenHome(session.worktreePath);
 		const pathTruncated = truncate(shortPath, width - 4);
 		const pathColor = editorState === "closed" ? COLORS.editorClosed : COLORS.subtitle;
-		const pathLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${bg}${pathColor}${padRight(pathTruncated, width - 4)}${resetBg}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+		const pathLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${pathColor}${padRight(pathTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 		lines.push(pathLine);
 
 		// Agent status lines
 		if (session.agents.length === 0) {
 			const noAgent = `${DIM}no agents${RESET}`;
-			const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${bg}${padRight(noAgent, width - 4)}${resetBg}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+			const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(noAgent, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 			lines.push(agentLine);
 		} else {
 			for (const agent of session.agents) {
@@ -135,7 +133,7 @@ function renderCard(
 				const sColor = statusColor(agent.status);
 				const statusText = `${sColor}${sIcon} ${agent.status}${RESET}`;
 				const agentInfo = `${statusText} ${detailColor}${agent.agentType}${RESET}`;
-				const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${bg}${padRight(agentInfo, width - 4)}${resetBg}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+				const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(agentInfo, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 				lines.push(agentLine);
 
 				// Show latest tool activity
@@ -144,7 +142,7 @@ function renderCard(
 						? `${detailColor}${agent.toolName}${RESET} ${detailColor}${agent.toolDetail}${RESET}`
 						: `${detailColor}${agent.toolName}${RESET}`;
 					const detailTruncated = truncate(`  ${detail}`, width - 4);
-					const detailLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${bg}${padRight(detailTruncated, width - 4)}${resetBg}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+					const detailLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(detailTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 					lines.push(detailLine);
 				}
 			}
@@ -157,15 +155,15 @@ function renderCard(
 						.map((a) => `${statusColor(a.status)}${statusIcon(a.status, animFrame)}${RESET}`)
 						.join(" ")
 				: `${DIM}no agents${RESET}`;
-		const compactLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${bg}${padRight(agentSummary, width - 4)}${resetBg}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+		const compactLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(agentSummary, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 		lines.push(compactLine);
 	}
 
 	// Delete confirmation inline
 	if (isSelected && deleteConfirm && deleteConfirm.sessionId === session.id) {
-		const confirmLines = renderDeleteConfirm(deleteConfirm, cols);
+		const confirmLines = renderDeleteConfirm(deleteConfirm);
 		for (const cl of confirmLines) {
-			const confirmLine = `${borderColor}${BOX.vertical}${RESET} ${padRight(cl, width - 4)} ${borderColor}${BOX.vertical}${RESET}`;
+			const confirmLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(cl, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 			lines.push(confirmLine);
 		}
 	}

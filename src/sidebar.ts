@@ -357,6 +357,13 @@ async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Prom
 	}
 }
 
+function getManagedEditorTitles(sessions: SidebarState["sessions"]): string[] {
+	return sessions
+		.filter((s) => s.editorState !== "closed")
+		.map((s) => s.worktreePath.split("/").pop() ?? "")
+		.filter((t) => t.length > 0);
+}
+
 export async function runSidebar(): Promise<void> {
 	const config = loadConfig();
 	const state = createInitialState();
@@ -374,8 +381,7 @@ export async function runSidebar(): Promise<void> {
 		state.rows = process.stdout.rows ?? 24;
 		state.cols = process.stdout.columns ?? 80;
 		render(state);
-		// Reposition all VS Code windows to fill remaining space
-		await repositionAllEditors();
+		await repositionAllEditors(getManagedEditorTitles(state.sessions));
 	});
 
 	// Animation timer (200ms) — only repaint when there's something animating
@@ -516,7 +522,7 @@ export async function runSidebar(): Promise<void> {
 				break;
 
 			case "realign":
-				await repositionAllEditors();
+				await repositionAllEditors(getManagedEditorTitles(state.sessions));
 				break;
 
 			case "mouse_click": {

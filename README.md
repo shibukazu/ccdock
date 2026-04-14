@@ -1,5 +1,9 @@
-# ccdock
+<div align="center"><img width="216" height="216" alt="image" src="https://github.com/user-attachments/assets/0232d436-f0d9-4986-8c51-d760ea2c8109" /></div>
 
+<div align="center">
+  
+# ccdock
+</div>
 A TUI sidebar to orchestrate VS Code windows and track Claude Code agents.
 
 <div align="center">

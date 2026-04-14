@@ -10,7 +10,9 @@ A TUI sidebar to orchestrate VS Code windows and track Claude Code agents.
 <video src="https://github.com/user-attachments/assets/fed113ef-be36-4cea-9b6b-2bc9f3db1448" width="300" autoplay loop muted playsinline></video>
 </div>
 
-
+<a href="https://orynth.dev/projects/ccdock" target="_blank" rel="noopener">
+  <img src="https://orynth.dev/api/badge/ccdock?theme=light&style=default" alt="Featured on Orynth" width="260" height="80" />
+</a>
 
 ## Why?
 

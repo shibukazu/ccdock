@@ -2,6 +2,12 @@
 
 A TUI sidebar to orchestrate VS Code windows and track Claude Code agents.
 
+<div align="center">
+<video src="https://github.com/user-attachments/assets/fed113ef-be36-4cea-9b6b-2bc9f3db1448" width="300" autoplay loop muted playsinline></video>
+</div>
+
+
+
 ## Why?
 
 Running multiple Claude Code agents across git worktrees is powerful — but managing the VS Code windows that go with them is a nightmare. You end up Alt-Tabbing through a dozen windows, losing track of which agent is doing what, and manually arranging editors every time you switch context.

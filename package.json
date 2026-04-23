@@ -1,6 +1,6 @@
 {
   "name": "ccdock",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A TUI sidebar to orchestrate VS Code windows and track Claude Code agents.",
   "type": "module",
   "bin": {

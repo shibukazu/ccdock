@@ -7,6 +7,7 @@ import {
 	closeEditorWindow,
 	listEditorWindows,
 	getFocusedEditorWindow,
+	windowMatchesWorktree,
 } from "./workspace/window.ts";
 import { disableRawMode, enableRawMode, parseKey, parseKeyWizard } from "./tui/input.ts";
 import { renderSidebar } from "./tui/render.ts";
@@ -20,7 +21,13 @@ import {
 	loadSessions,
 	saveSession,
 } from "./workspace/state.ts";
-import { createWorktree, listWorktrees, removeWorktree } from "./worktree/manager.ts";
+import {
+	createWorktree,
+	createWorktreeFromRemote,
+	listWorktrees,
+	removeWorktree,
+} from "./worktree/manager.ts";
+import { listRemoteBranches } from "./worktree/remote.ts";
 import { scanRepos } from "./worktree/scanner.ts";
 
 function sessionNameFromBranch(branchName: string): string {
@@ -43,6 +50,7 @@ function createInitialState(): SidebarState {
 		wizard: null,
 		deleteConfirm: null,
 		quitConfirm: null,
+		deletingSessionIds: new Set(),
 	};
 }
 
@@ -65,8 +73,12 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 
 	for (const session of sessions) {
 		const basename = session.worktreePath.split("/").pop() ?? "";
-		const hasWindow = editorWindows.some((w) => w.includes(basename));
-		if (hasWindow && focusedEditor.isFrontmost && focusedEditor.frontWindow.includes(basename)) {
+		const hasWindow = editorWindows.some((w) => windowMatchesWorktree(w, basename));
+		if (
+			hasWindow &&
+			focusedEditor.isFrontmost &&
+			windowMatchesWorktree(focusedEditor.frontWindow, basename)
+		) {
 			session.editorState = "focused";
 		} else if (hasWindow) {
 			session.editorState = "open";
@@ -178,18 +190,29 @@ async function handleWizardInput(
 					wizard.selectedIndex = Math.max(0, wizard.selectedIndex - 1);
 					break;
 				case "down":
-					wizard.selectedIndex = Math.min(2, wizard.selectedIndex + 1);
+					wizard.selectedIndex = Math.min(3, wizard.selectedIndex + 1);
 					break;
 				case "enter":
 					if (wizard.selectedIndex === 0) {
-						// Create new worktree (git wt)
+						// Create new worktree (git wt) — ask about fetch first
 						state.wizard = {
-							step: "enter-branch",
+							step: "fetch-choice",
 							repo: wizard.repo,
-							branchName: "",
+							selectedIndex: 0,
 							repos: wizard.repos,
 						};
 					} else if (wizard.selectedIndex === 1) {
+						// From remote branch — fetch and show remote branches
+						const branches = await listRemoteBranches(wizard.repo.path);
+						state.wizard = {
+							step: "select-remote-branch",
+							repo: wizard.repo,
+							branches,
+							selectedIndex: 0,
+							filter: "",
+							repos: wizard.repos,
+						};
+					} else if (wizard.selectedIndex === 2) {
 						// Use existing worktree
 						const worktrees = await listWorktrees(wizard.repo.path);
 						state.wizard = {
@@ -199,7 +222,7 @@ async function handleWizardInput(
 							selectedIndex: 0,
 							repos: wizard.repos,
 						};
-					} else if (wizard.selectedIndex === 2) {
+					} else if (wizard.selectedIndex === 3) {
 						// Open repository root
 						await createSessionFromPath(
 							wizard.repo,
@@ -243,7 +266,35 @@ async function handleWizardInput(
 					state.wizard = {
 						step: "select-mode",
 						repo: wizard.repo,
-						selectedIndex: 1,
+						selectedIndex: 2,
+						repos: wizard.repos,
+					};
+					break;
+			}
+			break;
+		}
+		case "fetch-choice": {
+			switch (key.type) {
+				case "up":
+					wizard.selectedIndex = Math.max(0, wizard.selectedIndex - 1);
+					break;
+				case "down":
+					wizard.selectedIndex = Math.min(1, wizard.selectedIndex + 1);
+					break;
+				case "enter":
+					state.wizard = {
+						step: "enter-branch",
+						repo: wizard.repo,
+						branchName: "",
+						fetchBeforeCreate: wizard.selectedIndex === 0,
+						repos: wizard.repos,
+					};
+					break;
+				case "escape":
+					state.wizard = {
+						step: "select-mode",
+						repo: wizard.repo,
+						selectedIndex: 0,
 						repos: wizard.repos,
 					};
 					break;
@@ -254,7 +305,12 @@ async function handleWizardInput(
 			switch (key.type) {
 				case "enter": {
 					if (wizard.branchName.trim()) {
-						await createSession(wizard.repo, wizard.branchName.trim(), config.editor);
+						await createSession(
+							wizard.repo,
+							wizard.branchName.trim(),
+							config.editor,
+							wizard.fetchBeforeCreate,
+						);
 						state.wizard = null;
 						refreshSessions(state);
 					}
@@ -262,9 +318,9 @@ async function handleWizardInput(
 				}
 				case "escape":
 					state.wizard = {
-						step: "select-mode",
+						step: "fetch-choice",
 						repo: wizard.repo,
-						selectedIndex: 0,
+						selectedIndex: wizard.fetchBeforeCreate ? 0 : 1,
 						repos: wizard.repos,
 					};
 					break;
@@ -273,6 +329,88 @@ async function handleWizardInput(
 					break;
 				case "char":
 					wizard.branchName += key.char;
+					break;
+			}
+			break;
+		}
+		case "select-remote-branch": {
+			const filteredBranches = wizard.branches.filter((b) =>
+				b.toLowerCase().includes(wizard.filter.toLowerCase()),
+			);
+			switch (key.type) {
+				case "up":
+					wizard.selectedIndex = Math.max(0, wizard.selectedIndex - 1);
+					break;
+				case "down":
+					wizard.selectedIndex = Math.min(
+						Math.max(0, filteredBranches.length - 1),
+						wizard.selectedIndex + 1,
+					);
+					break;
+				case "enter": {
+					const selected = filteredBranches[wizard.selectedIndex];
+					if (selected) {
+						state.wizard = {
+							step: "enter-local-branch",
+							repo: wizard.repo,
+							remoteRef: selected,
+							localBranch: selected.replace(/^origin\//, ""),
+							repos: wizard.repos,
+						};
+					}
+					break;
+				}
+				case "escape":
+					state.wizard = {
+						step: "select-mode",
+						repo: wizard.repo,
+						selectedIndex: 1,
+						repos: wizard.repos,
+					};
+					break;
+				case "backspace":
+					wizard.filter = wizard.filter.slice(0, -1);
+					wizard.selectedIndex = 0;
+					break;
+				case "char":
+					wizard.filter += key.char;
+					wizard.selectedIndex = 0;
+					break;
+			}
+			break;
+		}
+		case "enter-local-branch": {
+			switch (key.type) {
+				case "enter": {
+					if (wizard.localBranch.trim()) {
+						await createSessionFromRemote(
+							wizard.repo,
+							wizard.localBranch.trim(),
+							wizard.remoteRef,
+							config.editor,
+						);
+						state.wizard = null;
+						refreshSessions(state);
+					}
+					break;
+				}
+				case "escape":
+					state.wizard = {
+						step: "select-remote-branch",
+						repo: wizard.repo,
+						branches: [],
+						selectedIndex: 0,
+						filter: "",
+						repos: wizard.repos,
+					};
+					// re-fetch branches lazily — simpler to re-run the list now
+					state.wizard.branches = await listRemoteBranches(wizard.repo.path);
+					break;
+				case "backspace":
+					wizard.localBranch = wizard.localBranch.slice(0, -1);
+					break;
+				case "char":
+					wizard.localBranch += key.char;
 					break;
 			}
 			break;
@@ -307,13 +445,36 @@ async function createSessionFromPath(
 	}
 }
 
-async function createSession(repo: RepoInfo, branchName: string, editor: string): Promise<void> {
+async function createSession(
+	repo: RepoInfo,
+	branchName: string,
+	editor: string,
+	fetchBeforeCreate: boolean,
+): Promise<void> {
 	try {
-		const worktreePath = await createWorktree(repo.path, branchName);
+		const worktreePath = await createWorktree(repo.path, branchName, {
+			fetch: fetchBeforeCreate,
+			base: repo.defaultBranch,
+		});
 		await createSessionFromPath(repo, worktreePath, branchName, editor);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : "Unknown error";
 		process.stderr.write(`\nError creating session: ${msg}\n`);
+	}
+}
+
+async function createSessionFromRemote(
+	repo: RepoInfo,
+	localBranch: string,
+	remoteRef: string,
+	editor: string,
+): Promise<void> {
+	try {
+		const worktreePath = await createWorktreeFromRemote(repo.path, localBranch, remoteRef);
+		await createSessionFromPath(repo, worktreePath, localBranch, editor);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : "Unknown error";
+		process.stderr.write(`\nError creating session from remote: ${msg}\n`);
 	}
 }
 
@@ -331,24 +492,46 @@ async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Prom
 			confirm.selectedIndex = Math.min(1, confirm.selectedIndex + 1);
 			break;
 		case "enter": {
-			// Close the VS Code window for this session
-			const basename = confirm.worktreePath.split("/").pop() ?? "";
-			await closeEditorWindow(basename);
-
-			// Delete session state
-			deleteSession(confirm.sessionId);
-
-			if (confirm.selectedIndex === 1) {
-				// Also remove worktree
-				try {
-					await removeWorktree(confirm.worktreePath);
-				} catch {
-					// Worktree might already be removed or busy
-				}
-			}
-
+			const { sessionId, worktreePath, selectedIndex } = confirm;
+			const removeWorktreeToo = selectedIndex === 1;
+			// Close the confirm modal immediately and mark the card as deleting
 			state.deleteConfirm = null;
-			refreshSessions(state);
+			state.deletingSessionIds.add(sessionId);
+			render(state);
+
+			// Perform the actual deletion asynchronously so the spinner stays responsive
+			void (async () => {
+				try {
+					const basename = worktreePath.split("/").pop() ?? "";
+					await closeEditorWindow(basename);
+					deleteSession(sessionId);
+
+					if (removeWorktreeToo) {
+						try {
+							await removeWorktree(worktreePath);
+						} catch (err) {
+							const msg = err instanceof Error ? err.message : "Unknown error";
+							state.activityLog.push({
+								time: new Date().toLocaleTimeString("en-US", {
+									hour12: false,
+									hour: "2-digit",
+									minute: "2-digit",
+									second: "2-digit",
+								}),
+								sessionId,
+								sessionIndex: -1,
+								agent: "ccdock",
+								tool: "[error]",
+								toolDetail: `worktree remove failed: ${msg}`,
+							});
+						}
+					}
+				} finally {
+					state.deletingSessionIds.delete(sessionId);
+					await refreshSessions(state);
+					render(state);
+				}
+			})();
 			break;
 		}
 		case "escape":
@@ -357,7 +540,7 @@ async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Prom
 	}
 }
 
-function getManagedEditorTitles(sessions: SidebarState["sessions"]): string[] {
+function getManagedEditorBasenames(sessions: SidebarState["sessions"]): string[] {
 	return sessions
 		.filter((s) => s.editorState !== "closed")
 		.map((s) => s.worktreePath.split("/").pop() ?? "")
@@ -381,7 +564,7 @@ export async function runSidebar(): Promise<void> {
 		state.rows = process.stdout.rows ?? 24;
 		state.cols = process.stdout.columns ?? 80;
 		render(state);
-		await repositionAllEditors(getManagedEditorTitles(state.sessions));
+		await repositionAllEditors(getManagedEditorBasenames(state.sessions));
 	});
 
 	// Animation timer (200ms) — only repaint when there's something animating
@@ -392,7 +575,13 @@ export async function runSidebar(): Promise<void> {
 				s.editorState === "launching" ||
 				s.agents.some((a) => a.status === "running" || a.status === "waiting"),
 		);
-		if (hasAnimated || state.wizard || state.deleteConfirm || state.quitConfirm) {
+		if (
+			hasAnimated ||
+			state.wizard ||
+			state.deleteConfirm ||
+			state.quitConfirm ||
+			state.deletingSessionIds.size > 0
+		) {
 			render(state);
 		}
 	}, 200);
@@ -477,7 +666,7 @@ export async function runSidebar(): Promise<void> {
 			case "enter":
 			case "tab": {
 				const session = state.sessions[state.selectedIndex];
-				if (session) {
+				if (session && !state.deletingSessionIds.has(session.id)) {
 					const focused = await focusEditor(session.worktreePath, config.editor);
 					if (!focused) {
 						// Show launching state while VS Code opens
@@ -503,7 +692,7 @@ export async function runSidebar(): Promise<void> {
 
 			case "delete": {
 				const session = state.sessions[state.selectedIndex];
-				if (session) {
+				if (session && !state.deletingSessionIds.has(session.id)) {
 					state.deleteConfirm = {
 						sessionId: session.id,
 						worktreePath: session.worktreePath,
@@ -522,7 +711,7 @@ export async function runSidebar(): Promise<void> {
 				break;
 
 			case "realign":
-				await repositionAllEditors(getManagedEditorTitles(state.sessions));
+				await repositionAllEditors(getManagedEditorBasenames(state.sessions));
 				break;
 
 			case "mouse_click": {
@@ -532,7 +721,7 @@ export async function runSidebar(): Promise<void> {
 				if (clicked) {
 					state.selectedIndex = clicked.sessionIndex;
 					const session = state.sessions[clicked.sessionIndex];
-					if (session) {
+					if (session && !state.deletingSessionIds.has(session.id)) {
 						const focused = await focusEditor(session.worktreePath, config.editor);
 						if (!focused) {
 							session.editorState = "launching";

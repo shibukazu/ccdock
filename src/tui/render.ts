@@ -68,6 +68,7 @@ function renderCard(
 	compact: boolean,
 	deleteConfirm: DeleteConfirm | null,
 	sessionIndex: number,
+	isDeleting: boolean,
 ): string[] {
 	const lines: string[] = [];
 	const width = Math.max(cols - 2, 20);
@@ -76,21 +77,24 @@ function renderCard(
 	// Focused: white border, normal title
 	// Open: normal border + green ● dot
 	// Closed: dim everything
+	// Deleting: error-colored border, spinner
 	const editorState = session.editorState;
 	const isFocused = editorState === "focused";
 	const isClosed = editorState === "closed";
 	const isLaunching = editorState === "launching";
-	// Border color: VS Code focused > J/K selected > closed/open
-	const borderColor = isFocused
-		? COLORS.borderFocused
-		: isSelected
-			? COLORS.borderSelected
-			: isClosed
-				? COLORS.borderClosed
-				: COLORS.border;
-	const titleColor = isClosed ? COLORS.editorClosed : COLORS.title;
+	// Border color: Deleting > VS Code focused > J/K selected > closed/open
+	const borderColor = isDeleting
+		? COLORS.error
+		: isFocused
+			? COLORS.borderFocused
+			: isSelected
+				? COLORS.borderSelected
+				: isClosed
+					? COLORS.borderClosed
+					: COLORS.border;
+	const titleColor = isDeleting ? COLORS.error : isClosed ? COLORS.editorClosed : COLORS.title;
 	const detailColor = isClosed ? COLORS.editorClosed : COLORS.subtitle;
-	const dimAll = isClosed ? DIM : "";
+	const dimAll = isClosed && !isDeleting ? DIM : "";
 
 	// Status dot: spinning for launching, green solid for open/focused, none for closed
 	let openDot = "";
@@ -122,8 +126,12 @@ function renderCard(
 		const pathLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${pathColor}${padRight(pathTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 		lines.push(pathLine);
 
-		// Agent status lines
-		if (session.agents.length === 0) {
+		if (isDeleting) {
+			const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
+			const deleteText = `${COLORS.error}${frame} Deleting session...${RESET}`;
+			const deleteLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(deleteText, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+			lines.push(deleteLine);
+		} else if (session.agents.length === 0) {
 			const noAgent = `${DIM}no agents${RESET}`;
 			const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(noAgent, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 			lines.push(agentLine);
@@ -149,12 +157,17 @@ function renderCard(
 		}
 	} else {
 		// Compact: just show agent status inline
-		const agentSummary =
-			session.agents.length > 0
-				? session.agents
-						.map((a) => `${statusColor(a.status)}${statusIcon(a.status, animFrame)}${RESET}`)
-						.join(" ")
-				: `${DIM}no agents${RESET}`;
+		let agentSummary: string;
+		if (isDeleting) {
+			const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
+			agentSummary = `${COLORS.error}${frame} deleting${RESET}`;
+		} else if (session.agents.length > 0) {
+			agentSummary = session.agents
+				.map((a) => `${statusColor(a.status)}${statusIcon(a.status, animFrame)}${RESET}`)
+				.join(" ");
+		} else {
+			agentSummary = `${DIM}no agents${RESET}`;
+		}
 		const compactLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(agentSummary, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 		lines.push(compactLine);
 	}
@@ -279,6 +292,7 @@ export function renderSidebar(state: SidebarState): string {
 			state.compactMode,
 			state.deleteConfirm,
 			i,
+			state.deletingSessionIds.has(session.id),
 		);
 
 		if (linesUsed + cardLines.length > availableForCards) break;

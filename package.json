@@ -10,7 +10,8 @@
     "dev": "bun run src/main.ts",
     "build": "bun build --compile src/main.ts --outfile ccdock",
     "typecheck": "bunx tsc --noEmit",
-    "format": "bunx @biomejs/biome format --write src/"
+    "format": "bunx @biomejs/biome format --write src/ test/",
+    "test": "bun test"
   },
   "keywords": [
     "claude-code",

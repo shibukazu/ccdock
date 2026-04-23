@@ -1,5 +1,5 @@
 export type AgentType = "claude-code" | "codex";
-export type AgentStatus = "running" | "waiting" | "idle" | "error" | "unknown";
+export type AgentStatus = "running" | "waiting" | "idle" | "stopped" | "error" | "unknown";
 
 export interface AgentState {
 	sessionId: string;
@@ -63,6 +63,7 @@ export interface SidebarState {
 	wizard: WizardState;
 	deleteConfirm: DeleteConfirm | null;
 	quitConfirm: { selectedIndex: number } | null; // 0=quit only, 1=quit+close editors
+	deletingSessionIds: Set<string>;
 }
 
 // Wizard steps for creating new sessions
@@ -76,7 +77,29 @@ export type WizardStep =
 			selectedIndex: number;
 			repos: RepoInfo[];
 	  }
-	| { step: "enter-branch"; repo: RepoInfo; branchName: string; repos: RepoInfo[] };
+	| { step: "fetch-choice"; repo: RepoInfo; selectedIndex: number; repos: RepoInfo[] }
+	| {
+			step: "enter-branch";
+			repo: RepoInfo;
+			branchName: string;
+			fetchBeforeCreate: boolean;
+			repos: RepoInfo[];
+	  }
+	| {
+			step: "select-remote-branch";
+			repo: RepoInfo;
+			branches: string[];
+			selectedIndex: number;
+			filter: string;
+			repos: RepoInfo[];
+	  }
+	| {
+			step: "enter-local-branch";
+			repo: RepoInfo;
+			remoteRef: string;
+			localBranch: string;
+			repos: RepoInfo[];
+	  };
 
 export type WizardState = WizardStep | null;
 

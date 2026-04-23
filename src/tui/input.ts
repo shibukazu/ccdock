@@ -21,9 +21,31 @@ export type WizardKeyAction =
 	| { type: "char"; char: string }
 	| { type: "unknown" };
 
+/**
+ * Normalize fullwidth ASCII letters / digits / symbols (U+FF01–U+FF5E)
+ * to halfwidth so that keyboard shortcuts still fire while a Japanese IME
+ * is active. Also maps the fullwidth space (U+3000) to a regular space.
+ * Non-ASCII runes outside this range are passed through unchanged.
+ */
+export function normalizeFullwidth(s: string): string {
+	let out = "";
+	for (const ch of s) {
+		const code = ch.charCodeAt(0);
+		if (code >= 0xff01 && code <= 0xff5e) {
+			out += String.fromCharCode(code - 0xfee0);
+		} else if (code === 0x3000) {
+			out += " ";
+		} else {
+			out += ch;
+		}
+	}
+	return out;
+}
+
 export function parseKey(data: Buffer): KeyAction {
 	// SGR mouse: \x1b[<button;col;rowM (press) or \x1b[<button;col;rowm (release)
-	const s = data.toString();
+	const raw = data.toString();
+	const s = normalizeFullwidth(raw);
 	const sgrMatch = s.match(/^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/);
 	if (sgrMatch) {
 		const button = Number.parseInt(sgrMatch[1]!, 10);
@@ -72,7 +94,8 @@ export function parseKey(data: Buffer): KeyAction {
 }
 
 export function parseKeyWizard(data: Buffer): WizardKeyAction {
-	const s = data.toString();
+	const raw = data.toString();
+	const s = normalizeFullwidth(raw);
 
 	// Escape sequences for arrow keys
 	if (s === "\x1b[A") return { type: "up" };

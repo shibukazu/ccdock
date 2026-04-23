@@ -123,7 +123,8 @@ ccdock help     # show help
 | ---- | ------ | ----------- |
 | `●` green | running | Agent is executing tools |
 | `●`/`○` yellow pulse | waiting | Awaiting user permission |
-| `○` teal | idle | Agent is ready |
+| `○` gray | idle | Agent started but hasn't done anything yet |
+| `●` teal | stopped | Agent finished its turn (Stop event received) |
 
 ## How it works
 

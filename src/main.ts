@@ -24,7 +24,7 @@ HOOK USAGE:
   ccdock hook <agent-type> <event-name>
 
   Agent types: claude-code, codex
-  Events: PreToolUse, PostToolUse, Stop, session.end, Notification
+  Events: PreToolUse, PostToolUse, PermissionRequest, Stop, Notification, SessionEnd
 
 KEYBINDINGS (sidebar):
   j/k         Navigate sessions

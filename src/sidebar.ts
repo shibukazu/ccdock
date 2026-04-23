@@ -130,7 +130,9 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 let lastRendered = "";
 
 function render(state: SidebarState): void {
-	const output = state.wizard ? renderWizard(state.wizard, state.cols) : renderSidebar(state);
+	const output = state.wizard
+		? renderWizard(state.wizard, state.cols, state.animationFrame)
+		: renderSidebar(state);
 	if (output === lastRendered) return;
 	lastRendered = output;
 	process.stdout.write(output);
@@ -224,14 +226,19 @@ async function handleWizardInput(
 						};
 					} else if (wizard.selectedIndex === 3) {
 						// Open repository root
-						await createSessionFromPath(
-							wizard.repo,
-							wizard.repo.path,
-							wizard.repo.defaultBranch,
-							config.editor,
-						);
-						state.wizard = null;
-						refreshSessions(state);
+						const repo = wizard.repo;
+						state.wizard = {
+							step: "creating",
+							repo,
+							message: "Opening repository...",
+						};
+						render(state);
+						void (async () => {
+							await createSessionFromPath(repo, repo.path, repo.defaultBranch, config.editor);
+							state.wizard = null;
+							await refreshSessions(state);
+							render(state);
+						})();
 					}
 					break;
 				case "escape":
@@ -256,9 +263,19 @@ async function handleWizardInput(
 				case "enter": {
 					const selected = wizard.worktrees[wizard.selectedIndex];
 					if (selected) {
-						await createSessionFromPath(wizard.repo, selected.path, selected.branch, config.editor);
-						state.wizard = null;
-						refreshSessions(state);
+						const repo = wizard.repo;
+						state.wizard = {
+							step: "creating",
+							repo,
+							message: "Opening worktree...",
+						};
+						render(state);
+						void (async () => {
+							await createSessionFromPath(repo, selected.path, selected.branch, config.editor);
+							state.wizard = null;
+							await refreshSessions(state);
+							render(state);
+						})();
 					}
 					break;
 				}
@@ -305,14 +322,21 @@ async function handleWizardInput(
 			switch (key.type) {
 				case "enter": {
 					if (wizard.branchName.trim()) {
-						await createSession(
-							wizard.repo,
-							wizard.branchName.trim(),
-							config.editor,
-							wizard.fetchBeforeCreate,
-						);
-						state.wizard = null;
-						refreshSessions(state);
+						const repo = wizard.repo;
+						const branch = wizard.branchName.trim();
+						const fetchBefore = wizard.fetchBeforeCreate;
+						state.wizard = {
+							step: "creating",
+							repo,
+							message: "Creating worktree...",
+						};
+						render(state);
+						void (async () => {
+							await createSession(repo, branch, config.editor, fetchBefore);
+							state.wizard = null;
+							await refreshSessions(state);
+							render(state);
+						})();
 					}
 					break;
 				}
@@ -383,14 +407,21 @@ async function handleWizardInput(
 			switch (key.type) {
 				case "enter": {
 					if (wizard.localBranch.trim()) {
-						await createSessionFromRemote(
-							wizard.repo,
-							wizard.localBranch.trim(),
-							wizard.remoteRef,
-							config.editor,
-						);
-						state.wizard = null;
-						refreshSessions(state);
+						const repo = wizard.repo;
+						const localBranch = wizard.localBranch.trim();
+						const remoteRef = wizard.remoteRef;
+						state.wizard = {
+							step: "creating",
+							repo,
+							message: "Creating worktree from remote...",
+						};
+						render(state);
+						void (async () => {
+							await createSessionFromRemote(repo, localBranch, remoteRef, config.editor);
+							state.wizard = null;
+							await refreshSessions(state);
+							render(state);
+						})();
 					}
 					break;
 				}
@@ -415,6 +446,9 @@ async function handleWizardInput(
 			}
 			break;
 		}
+		case "creating":
+			// Ignore all input while creating — operation is in progress
+			break;
 	}
 }
 

@@ -99,6 +99,11 @@ export type WizardStep =
 			remoteRef: string;
 			localBranch: string;
 			repos: RepoInfo[];
+	  }
+	| {
+			step: "creating";
+			repo: RepoInfo;
+			message: string;
 	  };
 
 export type WizardState = WizardStep | null;

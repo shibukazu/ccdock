@@ -1,6 +1,8 @@
 import type { RepoInfo, WizardState, WorktreeEntry } from "../types.ts";
 import { BOLD, BOX, CLEAR_SCREEN, COLORS, CURSOR_HOME, DIM, RESET, truncate } from "./ansi.ts";
 
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 function renderRepoList(
 	repos: RepoInfo[],
 	selectedIndex: number,
@@ -258,7 +260,25 @@ function renderLocalBranchInput(
 	return lines;
 }
 
-export function renderWizard(wizard: WizardState, cols: number): string {
+function renderCreating(
+	repo: RepoInfo,
+	message: string,
+	cols: number,
+	animFrame: number,
+): string[] {
+	const lines: string[] = [];
+	const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
+
+	lines.push(`${BOLD}${COLORS.highlight} Creating Session: ${repo.name}${RESET}`);
+	lines.push("");
+	lines.push(`  ${COLORS.highlight}${frame}${RESET} ${message}`);
+	lines.push("");
+	lines.push(`${COLORS.muted}  Please wait...${RESET}`);
+
+	return lines;
+}
+
+export function renderWizard(wizard: WizardState, cols: number, animFrame = 0): string {
 	if (!wizard) return "";
 
 	const output: string[] = [];
@@ -293,6 +313,9 @@ export function renderWizard(wizard: WizardState, cols: number): string {
 			break;
 		case "enter-local-branch":
 			content = renderLocalBranchInput(wizard.repo, wizard.remoteRef, wizard.localBranch, cols);
+			break;
+		case "creating":
+			content = renderCreating(wizard.repo, wizard.message, cols, animFrame);
 			break;
 	}
 

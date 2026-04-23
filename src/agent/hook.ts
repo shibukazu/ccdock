@@ -10,7 +10,18 @@ function sanitize(path: string): string {
 	return path.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
 }
 
-function extractToolDetail(toolName: string, toolInput: Record<string, unknown>): string {
+function extractToolDetail(
+	agentType: AgentType,
+	toolName: string,
+	toolInput: Record<string, unknown>,
+): string {
+	if (agentType === "codex") {
+		return extractCodexToolDetail(toolName, toolInput);
+	}
+	return extractClaudeCodeToolDetail(toolName, toolInput);
+}
+
+function extractClaudeCodeToolDetail(toolName: string, toolInput: Record<string, unknown>): string {
 	switch (toolName) {
 		case "Bash":
 			return (toolInput.command as string) ?? "";
@@ -30,6 +41,26 @@ function extractToolDetail(toolName: string, toolInput: Record<string, unknown>)
 			return (toolInput.query as string) ?? "";
 		case "WebFetch":
 			return (toolInput.url as string) ?? "";
+		default:
+			return "";
+	}
+}
+
+function extractCodexToolDetail(toolName: string, toolInput: Record<string, unknown>): string {
+	switch (toolName) {
+		case "local_shell":
+		case "shell":
+		case "shell_command":
+		case "exec_command": {
+			const command = toolInput.command;
+			if (Array.isArray(command)) return command.join(" ");
+			if (typeof command === "string") return command;
+			return "";
+		}
+		case "apply_patch": {
+			const path = (toolInput.file_path as string) ?? (toolInput.path as string) ?? "";
+			return shortenPath(path);
+		}
 		default:
 			return "";
 	}
@@ -105,7 +136,7 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 	const sessionId = findSessionByPath(cwd);
 	const rawToolName = (payload.tool_name as string) ?? "";
 	const toolInput = (payload.tool_input as Record<string, unknown>) ?? {};
-	const rawToolDetail = extractToolDetail(rawToolName, toolInput);
+	const rawToolDetail = extractToolDetail(agentType as AgentType, rawToolName, toolInput);
 
 	// Preserve previous toolName/toolDetail only for events that don't carry tool info
 	// but clear them on Stop (stopped) since the agent is no longer doing anything

@@ -4,7 +4,7 @@
 # ccdock
 
 </div>
-A TUI sidebar to orchestrate VS Code windows and track Claude Code agents.
+A TUI sidebar to orchestrate VS Code windows and track Claude Code / Codex agents.
 
 <div align="center">
 <video src="https://github.com/user-attachments/assets/fed113ef-be36-4cea-9b6b-2bc9f3db1448" width="300" autoplay loop muted playsinline></video>
@@ -84,6 +84,47 @@ Add to `~/.claude/settings.json` to enable agent status monitoring:
   }
 }
 ```
+
+### 3. Set up Codex hooks (optional)
+
+If you use [OpenAI Codex CLI](https://github.com/openai/codex), you can forward its lifecycle hooks to ccdock too. Tested with `codex-cli 0.123.0`.
+
+1. Enable the under-development `codex_hooks` feature in `~/.codex/config.toml`:
+
+   ```toml
+   [features]
+   codex_hooks = true
+   ```
+
+2. Create `~/.codex/hooks.json` (Codex 0.123.0 only reads hooks from this file — inline TOML hooks in `config.toml` are not wired up yet):
+
+   ```json
+   {
+     "hooks": {
+       "PreToolUse": [
+         { "matcher": "", "hooks": [{ "type": "command", "command": "ccdock hook codex PreToolUse", "timeout": 30 }] }
+       ],
+       "PostToolUse": [
+         { "matcher": "", "hooks": [{ "type": "command", "command": "ccdock hook codex PostToolUse", "timeout": 30 }] }
+       ],
+       "PermissionRequest": [
+         { "matcher": "", "hooks": [{ "type": "command", "command": "ccdock hook codex PermissionRequest", "timeout": 30 }] }
+       ],
+       "Stop": [
+         { "matcher": "", "hooks": [{ "type": "command", "command": "ccdock hook codex Stop", "timeout": 30 }] }
+       ]
+     }
+   }
+   ```
+
+3. Restart Codex so it picks up the new configuration.
+
+**Known limitations (upstream Codex)**
+
+- Only `Bash`-style shell tools (`local_shell` / `shell` / `exec_command`) fire hooks reliably today. `apply_patch`, file writes, and MCP tool invocations currently do not emit `PreToolUse`/`PostToolUse` ([openai/codex#16732](https://github.com/openai/codex/issues/16732), [#17794](https://github.com/openai/codex/issues/17794)).
+- `Stop` does not fire under `codex exec` ([openai/codex#18607](https://github.com/openai/codex/issues/18607)); interactive sessions are fine.
+- Hooks are disabled on Windows.
+- Codex does not emit `SessionEnd`. Agents in the `stopped` state (after the `Stop` hook) are preserved indefinitely so completed sessions stay visible; entries are removed when the matching session is deleted or when the agent's `cwd` no longer maps to a known session.
 
 ## Usage
 

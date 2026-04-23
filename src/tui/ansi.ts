@@ -26,7 +26,8 @@ export function bg256(code: number): string {
 export const COLORS = {
 	running: fg256(82), // bright green
 	waiting: fg256(220), // yellow/orange
-	idle: fg256(73), // teal
+	idle: fg256(245), // muted gray — started but no activity yet
+	stopped: fg256(73), // teal — completed work (Stop event received)
 	error: fg256(196), // red
 	unknown: fg256(245), // gray
 
@@ -59,6 +60,8 @@ export function statusColor(status: string): string {
 			return COLORS.waiting;
 		case "idle":
 			return COLORS.idle;
+		case "stopped":
+			return COLORS.stopped;
 		case "error":
 			return COLORS.error;
 		default:
@@ -75,7 +78,9 @@ export function statusIcon(status: string, frame: number): string {
 		case "waiting":
 			return pulse ? "\u25cf" : "\u25cb";
 		case "idle":
-			return "\u25cb"; // ○
+			return "\u25cb"; // ○ — not started / no activity
+		case "stopped":
+			return "\u25cf"; // ● — completed
 		case "error":
 			return "\u25cf"; // ●
 		default:

@@ -10,13 +10,37 @@ interface WindowBounds {
 	height: number;
 }
 
+/**
+ * Strict match between a VS Code window title and a worktree basename.
+ * VS Code titles look like "<file> — <workspace>" or "<workspace> — Visual Studio Code",
+ * where the workspace token is bounded by em dash / slash / whitespace.
+ * We require a bounded match so that basename "foo" does not match window "foo-bar".
+ */
+export function windowMatchesWorktree(windowTitle: string, worktreeBasename: string): boolean {
+	if (!worktreeBasename || !windowTitle) return false;
+	const esc = worktreeBasename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const re = new RegExp(`(?:^|[\\s\\u2014/])${esc}(?:[\\s\\u2014/]|$)`);
+	return re.test(windowTitle);
+}
+
+async function resolveWindowTitles(worktreeBasename: string): Promise<string[]> {
+	const titles = await listEditorWindows();
+	return titles.filter((t) => windowMatchesWorktree(t, worktreeBasename));
+}
+
 async function runOsascript(script: string): Promise<string> {
 	const proc = Bun.spawn(["osascript", "-e", script], {
 		stdout: "pipe",
 		stderr: "pipe",
 	});
-	const out = await new Response(proc.stdout).text();
+	const [out, err] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+	]);
 	await proc.exited;
+	if (proc.exitCode !== 0 && err.trim() && process.env.CCDOCK_DEBUG) {
+		process.stderr.write(`[osascript] ${err.trim()}\n`);
+	}
 	return out.trim();
 }
 
@@ -114,33 +138,40 @@ result;
 	}
 }
 
+function escapeAppleScriptString(s: string): string {
+	return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 /**
  * Move and resize a VS Code window to fill the area right of the sidebar.
  * The VS Code window is brought to the current space and positioned
  * adjacent to the sidebar terminal.
+ *
+ * `worktreeBasename` is used to resolve a full window title via strict matching.
  */
 export async function positionEditorWindow(
-	windowTitle: string,
+	worktreeBasename: string,
 	sidebarBounds: WindowBounds,
 ): Promise<boolean> {
-	// Calculate editor position: right of sidebar, same height
+	const matches = await resolveWindowTitles(worktreeBasename);
+	const fullTitle = matches[0];
+	if (!fullTitle) return false;
+
 	const editorX = sidebarBounds.x + sidebarBounds.width + 4; // 4px gap
 	const editorY = sidebarBounds.y;
-	// Editor width: fill remaining space on the screen containing the sidebar
 	const screenRight = await getScreenRightEdge(sidebarBounds);
 	const editorWidth = screenRight - editorX;
 	const editorHeight = sidebarBounds.height;
 
 	try {
-		// Escape single quotes in title for AppleScript
-		const escapedTitle = windowTitle.replace(/'/g, "'\"'\"'");
+		const escapedTitle = escapeAppleScriptString(fullTitle);
 
 		await runOsascript(`
 tell application "System Events"
 	tell process "Code"
 		set targetWindow to missing value
 		repeat with w in every window
-			if name of w contains "${escapedTitle}" then
+			if name of w is "${escapedTitle}" then
 				set targetWindow to w
 				exit repeat
 			end if
@@ -159,36 +190,34 @@ end tell
 }
 
 /**
- * Check if a VS Code window with the given title exists.
+ * Check if a VS Code window matching the worktree basename exists.
  */
-export async function editorWindowExists(windowTitle: string): Promise<boolean> {
-	const windows = await listEditorWindows();
-	return windows.some((w) => w.includes(windowTitle));
+export async function editorWindowExists(worktreeBasename: string): Promise<boolean> {
+	const matches = await resolveWindowTitles(worktreeBasename);
+	return matches.length > 0;
 }
 
 /**
  * Bring a VS Code window to front and position it next to the sidebar.
- * Returns false if the window doesn't exist.
+ * Returns false if no matching window exists.
  */
-export async function focusAndPositionEditor(windowTitle: string): Promise<boolean> {
-	// First check if the window actually exists
-	if (!(await editorWindowExists(windowTitle))) {
-		return false;
-	}
+export async function focusAndPositionEditor(worktreeBasename: string): Promise<boolean> {
+	const matches = await resolveWindowTitles(worktreeBasename);
+	const fullTitle = matches[0];
+	if (!fullTitle) return false;
 
 	const sidebar = await getSidebarBounds();
 	if (!sidebar) return false;
 
 	try {
-		const escapedTitle = windowTitle.replace(/'/g, "'\"'\"'");
+		const escapedTitle = escapeAppleScriptString(fullTitle);
 
-		// Activate VS Code and raise the specific window
 		await runOsascript(`
 tell application "System Events"
 	tell process "Code"
 		set frontmost to true
 		repeat with w in every window
-			if name of w contains "${escapedTitle}" then
+			if name of w is "${escapedTitle}" then
 				perform action "AXRaise" of w
 				exit repeat
 			end if
@@ -197,8 +226,7 @@ tell application "System Events"
 end tell
 `);
 
-		// Position it next to sidebar
-		await positionEditorWindow(windowTitle, sidebar);
+		await positionEditorWindow(worktreeBasename, sidebar);
 		return true;
 	} catch {
 		return false;
@@ -285,19 +313,22 @@ tell application "Ghostty" to activate
 }
 
 /**
- * Close a specific VS Code window by title match.
- * Raises the window then sends Cmd+W to close it.
+ * Close a specific VS Code window matching the worktree basename.
+ * Raises the window then sends Cmd+Shift+W to close it.
  */
-export async function closeEditorWindow(windowTitle: string): Promise<void> {
+export async function closeEditorWindow(worktreeBasename: string): Promise<void> {
 	if (!(await isEditorRunning())) return;
+	const matches = await resolveWindowTitles(worktreeBasename);
+	const fullTitle = matches[0];
+	if (!fullTitle) return;
 	try {
-		const escapedTitle = windowTitle.replace(/'/g, "'\"'\"'");
+		const escapedTitle = escapeAppleScriptString(fullTitle);
 		await runOsascript(`
 tell application "System Events"
 	tell process "Code"
 		set frontmost to true
 		repeat with w in every window
-			if name of w contains "${escapedTitle}" then
+			if name of w is "${escapedTitle}" then
 				perform action "AXRaise" of w
 				delay 0.2
 				keystroke "w" using {command down, shift down}
@@ -337,13 +368,26 @@ end tell
 
 /**
  * Reposition managed VS Code windows to fill the area right of the sidebar.
- * Only windows whose title contains one of the managed titles are repositioned.
- * Called when the sidebar terminal is resized.
+ * Matching uses strict bounded matching (see windowMatchesWorktree) on the full
+ * list of window titles, and only matched windows are repositioned.
  */
-export async function repositionAllEditors(managedTitles: string[]): Promise<void> {
-	if (managedTitles.length === 0) return;
+export async function repositionAllEditors(managedBasenames: string[]): Promise<void> {
+	if (managedBasenames.length === 0) return;
 	const [running, sidebar] = await Promise.all([isEditorRunning(), getSidebarBounds()]);
 	if (!running || !sidebar) return;
+
+	// Resolve basenames -> full window titles via JS-side strict matching
+	const allTitles = await listEditorWindows();
+	const matchedTitles = new Set<string>();
+	for (const title of allTitles) {
+		for (const basename of managedBasenames) {
+			if (windowMatchesWorktree(title, basename)) {
+				matchedTitles.add(title);
+				break;
+			}
+		}
+	}
+	if (matchedTitles.size === 0) return;
 
 	try {
 		const editorX = sidebar.x + sidebar.width + 4;
@@ -352,8 +396,8 @@ export async function repositionAllEditors(managedTitles: string[]): Promise<voi
 		const editorWidth = screenRight - editorX;
 		const editorHeight = sidebar.height;
 
-		const titlesAppleScript = managedTitles
-			.map((t) => `"${t.replace(/"/g, '\\"')}"`)
+		const titlesAppleScript = Array.from(matchedTitles)
+			.map((t) => `"${escapeAppleScriptString(t)}"`)
 			.join(", ");
 
 		await runOsascript(`
@@ -364,7 +408,7 @@ tell application "System Events"
 			set wName to name of w
 			set isManaged to false
 			repeat with t in managedTitles
-				if wName contains t then
+				if wName is (t as text) then
 					set isManaged to true
 					exit repeat
 				end if

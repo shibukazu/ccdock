@@ -10,7 +10,10 @@ import { join } from "node:path";
 import type { AgentState, WorkspaceSession } from "../types.ts";
 
 const STATE_DIR_NAME = "ccdock";
-const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+// Agents in a transient state (running/waiting) are staled after 30 minutes
+// without updates. "stopped" (Stop event received) and "idle" (no work yet)
+// are never staled so completed/ready sessions stay visible indefinitely.
+const STALE_TRANSIENT_THRESHOLD_MS = 30 * 60 * 1000;
 
 export function getStateDir(): string {
 	const home = process.env.HOME ?? "";
@@ -100,13 +103,29 @@ export function cleanStaleAgents(): void {
 	const agentsDir = getAgentsDir();
 	const files = readdirSync(agentsDir).filter((f) => f.endsWith(".json"));
 	const now = Date.now();
+	const sessions = loadSessions();
+	const sessionPaths = sessions.map((s) => s.worktreePath);
+	const sessionIds = new Set(sessions.map((s) => s.id));
 
 	for (const file of files) {
 		try {
 			const filePath = join(agentsDir, file);
 			const raw = readFileSync(filePath, "utf-8");
 			const parsed = JSON.parse(raw) as AgentState;
-			if (now - parsed.updatedAt > STALE_THRESHOLD_MS) {
+
+			// Orphan check: agent belongs to no known session (neither by id nor by cwd prefix)
+			const hasSession =
+				(parsed.sessionId && sessionIds.has(parsed.sessionId)) ||
+				sessionPaths.some((p) => parsed.cwd.startsWith(p));
+			if (!hasSession) {
+				unlinkSync(filePath);
+				continue;
+			}
+
+			// "stopped" (completed) and "idle" (not yet started) are preserved indefinitely
+			if (parsed.status === "stopped" || parsed.status === "idle") continue;
+
+			if (now - parsed.updatedAt > STALE_TRANSIENT_THRESHOLD_MS) {
 				unlinkSync(filePath);
 			}
 		} catch {

@@ -60,7 +60,7 @@ const STATUS_MAP: Record<string, string> = {
 	PostToolUse: "running",
 	SubagentToolUse: "running",
 	PermissionRequest: "waiting",
-	Stop: "idle",
+	Stop: "stopped",
 	SessionEnd: "remove",
 };
 
@@ -108,10 +108,10 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 	const rawToolDetail = extractToolDetail(rawToolName, toolInput);
 
 	// Preserve previous toolName/toolDetail only for events that don't carry tool info
-	// but clear them on Stop (idle) since the agent is no longer doing anything
+	// but clear them on Stop (stopped) since the agent is no longer doing anything
 	let toolName = rawToolName;
 	let toolDetail = rawToolDetail;
-	if (!toolName && status !== "idle") {
+	if (!toolName && status !== "stopped") {
 		const prev = readAgentState(filename);
 		if (prev) {
 			toolName = prev.toolName ?? "";

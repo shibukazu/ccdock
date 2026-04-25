@@ -12,7 +12,7 @@ import {
 import { disableRawMode, enableRawMode, parseKey, parseKeyWizard } from "./tui/input.ts";
 import { renderSidebar } from "./tui/render.ts";
 import { renderWizard } from "./tui/wizard.ts";
-import type { RepoInfo, SidebarState } from "./types.ts";
+import type { AgentState, RepoInfo, SidebarState } from "./types.ts";
 import { focusEditor, openEditor } from "./workspace/editor.ts";
 import {
 	cleanStaleAgents,
@@ -58,11 +58,27 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 	const sessions = loadSessions();
 	const agentStates = loadAgentStates();
 
-	// Match agent states to sessions by cwd prefix
-	for (const session of sessions) {
-		session.agents = agentStates.filter(
-			(a) => a.cwd.startsWith(session.worktreePath) || a.sessionId === session.id,
-		);
+	// Match agent states to sessions by cwd prefix.
+	// Sort sessions by worktreePath length descending so that more specific
+	// paths (e.g. /repo/.wt/fix/foo) are matched before shorter prefixes
+	// (e.g. /repo), preventing worktree agents from also appearing under the
+	// main-branch session.
+	const sessionsByPathLen = [...sessions].sort(
+		(a, b) => b.worktreePath.length - a.worktreePath.length,
+	);
+	const assignedAgents = new Set<AgentState>();
+	for (const session of sessionsByPathLen) {
+		session.agents = agentStates.filter((a) => {
+			if (assignedAgents.has(a)) return false;
+			return (
+				a.sessionId === session.id ||
+				a.cwd.startsWith(`${session.worktreePath}/`) ||
+				a.cwd === session.worktreePath
+			);
+		});
+		for (const a of session.agents) {
+			assignedAgents.add(a);
+		}
 	}
 
 	// Detect editor window state for each session
@@ -104,7 +120,10 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 				second: "2-digit",
 			});
 			const sessionIdx = sessions.findIndex(
-				(s) => agent.cwd.startsWith(s.worktreePath) || agent.sessionId === s.id,
+				(s) =>
+					agent.sessionId === s.id ||
+					agent.cwd === s.worktreePath ||
+					agent.cwd.startsWith(`${s.worktreePath}/`),
 			);
 			// Only add if not duplicate of last entry
 			const lastEntry = state.activityLog[state.activityLog.length - 1];

@@ -116,7 +116,7 @@ export function cleanStaleAgents(): void {
 			// Orphan check: agent belongs to no known session (neither by id nor by cwd prefix)
 			const hasSession =
 				(parsed.sessionId && sessionIds.has(parsed.sessionId)) ||
-				sessionPaths.some((p) => parsed.cwd.startsWith(p));
+				sessionPaths.some((p) => parsed.cwd === p || parsed.cwd.startsWith(`${p}/`));
 			if (!hasSession) {
 				unlinkSync(filePath);
 				continue;
@@ -136,8 +136,11 @@ export function cleanStaleAgents(): void {
 
 export function findSessionByPath(cwd: string): string {
 	const sessions = loadSessions();
-	for (const session of sessions) {
-		if (cwd.startsWith(session.worktreePath)) {
+	// Sort by path length descending to match the most specific session first
+	// (e.g. /repo/.wt/fix/foo before /repo)
+	const sorted = [...sessions].sort((a, b) => b.worktreePath.length - a.worktreePath.length);
+	for (const session of sorted) {
+		if (cwd === session.worktreePath || cwd.startsWith(`${session.worktreePath}/`)) {
 			return session.id;
 		}
 	}

@@ -1,13 +1,28 @@
 /**
- * macOS native window management via AppleScript/osascript.
- * macOS native window management via AppleScript/System Events.
+ * macOS native window management via AppleScript / System Events.
+ *
+ * VS Code window identity:
+ *   We resolve windows by AXDocument (the URL of the file currently focused
+ *   inside the window) when possible — that path lies under the worktree
+ *   root, so two sessions sharing the same branch basename across different
+ *   repositories do not collide. AXDocument is empty for some VS Code views
+ *   (e.g. PR diff tabs, no editor open), so a basename match on the window
+ *   title is the fallback.
  */
+
+import { escapeAppleScriptString } from "./applescript.ts";
 
 interface WindowBounds {
 	x: number;
 	y: number;
 	width: number;
 	height: number;
+}
+
+export interface EditorWindow {
+	title: string;
+	/** Filesystem path of the focused document in this window, or null if VS Code does not expose one. */
+	documentPath: string | null;
 }
 
 /**
@@ -23,9 +38,63 @@ export function windowMatchesWorktree(windowTitle: string, worktreeBasename: str
 	return re.test(windowTitle);
 }
 
-async function resolveWindowTitles(worktreeBasename: string): Promise<string[]> {
-	const titles = await listEditorWindows();
-	return titles.filter((t) => windowMatchesWorktree(t, worktreeBasename));
+function decodeFileUrl(raw: string): string | null {
+	const trimmed = raw.trim();
+	if (!trimmed) return null;
+	// VS Code typically returns file:///<absolute-path>; older macOS variants
+	// can include a host component (file://localhost/...). Strip both.
+	let path: string;
+	if (trimmed.startsWith("file://")) {
+		path = trimmed.slice("file://".length);
+		if (path.startsWith("localhost/")) path = path.slice("localhost".length);
+	} else if (trimmed.startsWith("/")) {
+		path = trimmed; // already a plain absolute path
+	} else {
+		return null;
+	}
+	try {
+		return decodeURIComponent(path);
+	} catch {
+		return path;
+	}
+}
+
+/**
+ * True when the window's focused document lies inside the worktree directory.
+ * This is the strong signal — it disambiguates same-named branches across
+ * different repository roots without touching the user's repo files.
+ */
+export function windowMatchesWorktreePath(window: EditorWindow, worktreePath: string): boolean {
+	if (!window.documentPath || !worktreePath) return false;
+	const root = worktreePath.endsWith("/") ? worktreePath : `${worktreePath}/`;
+	return window.documentPath === worktreePath || window.documentPath.startsWith(root);
+}
+
+/**
+ * Combined match. Two channels:
+ *   1. AXDocument path under the worktree root (strongest — disambiguates
+ *      same-named branches across different repos).
+ *   2. Basename match against the window title (fallback for views that do
+ *      not expose AXDocument and for documents outside the worktree).
+ *
+ * The basename channel can produce a false positive when two repos host
+ * branches with the same basename and one of those windows has its focused
+ * document outside the worktree; the AXDocument channel handles the common
+ * case where the user is editing a file inside the worktree.
+ */
+export function windowMatches(
+	window: EditorWindow,
+	worktreePath: string,
+	worktreeBasename: string,
+): boolean {
+	if (windowMatchesWorktreePath(window, worktreePath)) return true;
+	return windowMatchesWorktree(window.title, worktreeBasename);
+}
+
+async function resolveMatchingWindows(worktreePath: string): Promise<EditorWindow[]> {
+	const basename = worktreePath.split("/").pop() ?? "";
+	const windows = await listEditorWindows();
+	return windows.filter((w) => windowMatches(w, worktreePath, basename));
 }
 
 async function runOsascript(script: string): Promise<string> {
@@ -138,23 +207,15 @@ result;
 	}
 }
 
-function escapeAppleScriptString(s: string): string {
-	return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
 /**
  * Move and resize a VS Code window to fill the area right of the sidebar.
- * The VS Code window is brought to the current space and positioned
- * adjacent to the sidebar terminal.
- *
- * `worktreeBasename` is used to resolve a full window title via strict matching.
  */
 export async function positionEditorWindow(
-	worktreeBasename: string,
+	worktreePath: string,
 	sidebarBounds: WindowBounds,
 ): Promise<boolean> {
-	const matches = await resolveWindowTitles(worktreeBasename);
-	const fullTitle = matches[0];
+	const matches = await resolveMatchingWindows(worktreePath);
+	const fullTitle = matches[0]?.title;
 	if (!fullTitle) return false;
 
 	const editorX = sidebarBounds.x + sidebarBounds.width + 4; // 4px gap
@@ -190,20 +251,20 @@ end tell
 }
 
 /**
- * Check if a VS Code window matching the worktree basename exists.
+ * Check if a VS Code window for this worktree exists.
  */
-export async function editorWindowExists(worktreeBasename: string): Promise<boolean> {
-	const matches = await resolveWindowTitles(worktreeBasename);
+export async function editorWindowExists(worktreePath: string): Promise<boolean> {
+	const matches = await resolveMatchingWindows(worktreePath);
 	return matches.length > 0;
 }
 
 /**
- * Bring a VS Code window to front and position it next to the sidebar.
- * Returns false if no matching window exists.
+ * Bring the VS Code window for this worktree to front and position it next
+ * to the sidebar. Returns false if no matching window exists.
  */
-export async function focusAndPositionEditor(worktreeBasename: string): Promise<boolean> {
-	const matches = await resolveWindowTitles(worktreeBasename);
-	const fullTitle = matches[0];
+export async function focusAndPositionEditor(worktreePath: string): Promise<boolean> {
+	const matches = await resolveMatchingWindows(worktreePath);
+	const fullTitle = matches[0]?.title;
 	if (!fullTitle) return false;
 
 	const sidebar = await getSidebarBounds();
@@ -226,16 +287,13 @@ tell application "System Events"
 end tell
 `);
 
-		await positionEditorWindow(worktreeBasename, sidebar);
+		await positionEditorWindow(worktreePath, sidebar);
 		return true;
 	} catch {
 		return false;
 	}
 }
 
-/**
- * Check if VS Code process is running.
- */
 async function isEditorRunning(): Promise<boolean> {
 	try {
 		const proc = Bun.spawn(["pgrep", "-x", "Code"], { stdout: "ignore", stderr: "ignore" });
@@ -246,62 +304,120 @@ async function isEditorRunning(): Promise<boolean> {
 	}
 }
 
+const FIELD_SEP = "<<F>>";
+const ROW_SEP = "<<R>>";
+
 /**
- * List all VS Code window titles.
+ * List all VS Code windows along with their AXDocument (focused file URL).
+ * AXDocument may be missing for non-editor views; in that case documentPath is null.
+ *
+ * The AppleScript is split into two passes — titles first, then per-window
+ * AXDocument lookups — because mutating `text item delimiters` inside the
+ * `tell process` block has been flaky in practice.
  */
-export async function listEditorWindows(): Promise<string[]> {
+export async function listEditorWindows(): Promise<EditorWindow[]> {
 	if (!(await isEditorRunning())) return [];
 	try {
+		// `tell process "Code"` is kept minimal: collect titles/docs into local
+		// variables only. Any reference to `end of <list>` inside that block
+		// reads as "last insertion point of <UI element>", which AppleScript
+		// then tries to assign to and fails (-10006). So we build the result
+		// list and join it outside the tell block.
 		const result = await runOsascript(`
+set winTitles to {}
+set winDocs to {}
 tell application "System Events"
 	tell process "Code"
-		set titles to {}
-		repeat with w in every window
-			set end of titles to name of w
-		end repeat
-		set AppleScript's text item delimiters to "|||"
-		return titles as text
+		set wins to every window
 	end tell
+	repeat with w in wins
+		set t to ""
+		set d to ""
+		tell process "Code"
+			try
+				set t to (name of w) as string
+			end try
+			try
+				set rawDoc to value of attribute "AXDocument" of w
+				if rawDoc is not missing value then set d to rawDoc as string
+			end try
+		end tell
+		copy t to end of winTitles
+		copy d to end of winDocs
+	end repeat
 end tell
+set savedDelim to AppleScript's text item delimiters
+set rows to {}
+set n to count of winTitles
+repeat with i from 1 to n
+	set row to (item i of winTitles) & "${FIELD_SEP}" & (item i of winDocs)
+	copy row to end of rows
+end repeat
+set AppleScript's text item delimiters to "${ROW_SEP}"
+set joined to rows as text
+set AppleScript's text item delimiters to savedDelim
+return joined
 `);
+		if (process.env.CCDOCK_DEBUG) {
+			process.stderr.write(`[listEditorWindows] raw=${JSON.stringify(result)}\n`);
+		}
 		if (!result) return [];
-		return result.split("|||").filter((t) => t.length > 0);
-	} catch {
+		return result
+			.split(ROW_SEP)
+			.filter((row) => row.length > 0)
+			.map((row) => {
+				const [title = "", doc = ""] = row.split(FIELD_SEP);
+				return { title, documentPath: doc ? decodeFileUrl(doc) : null };
+			});
+	} catch (err) {
+		if (process.env.CCDOCK_DEBUG) {
+			process.stderr.write(`[listEditorWindows] error=${String(err)}\n`);
+		}
 		return [];
 	}
 }
 
 /**
- * Get the focused (front) VS Code window title, and whether VS Code is frontmost app.
+ * Return the focused VS Code window and whether VS Code is the frontmost app.
  */
 export async function getFocusedEditorWindow(): Promise<{
-	frontWindow: string;
+	frontWindow: EditorWindow;
 	isFrontmost: boolean;
 }> {
-	if (!(await isEditorRunning())) return { frontWindow: "", isFrontmost: false };
+	const empty: EditorWindow = { title: "", documentPath: null };
+	if (!(await isEditorRunning())) return { frontWindow: empty, isFrontmost: false };
 	try {
 		const result = await runOsascript(`
+set wDoc to ""
+set wName to ""
+set isFront to false
 tell application "System Events"
 	tell process "Code"
 		set isFront to frontmost
-		set wName to name of front window
-		return (isFront as text) & "|||" & wName
+		try
+			set wName to (name of front window) as string
+		end try
+		try
+			set rawDoc to value of attribute "AXDocument" of front window
+			if rawDoc is not missing value then set wDoc to rawDoc as string
+		end try
 	end tell
 end tell
+return (isFront as text) & "${FIELD_SEP}" & wName & "${FIELD_SEP}" & wDoc
 `);
-		const [isFrontStr, windowName] = result.split("|||");
+		const [isFrontStr, windowName = "", doc = ""] = result.split(FIELD_SEP);
 		return {
-			frontWindow: windowName ?? "",
+			frontWindow: {
+				title: windowName,
+				documentPath: doc ? decodeFileUrl(doc) : null,
+			},
 			isFrontmost: isFrontStr === "true",
 		};
 	} catch {
-		return { frontWindow: "", isFrontmost: false };
+		return { frontWindow: empty, isFrontmost: false };
 	}
 }
 
-/**
- * Focus the sidebar terminal (bring Ghostty to front).
- */
 export async function focusSidebar(): Promise<void> {
 	try {
 		await runOsascript(`
@@ -313,13 +429,13 @@ tell application "Ghostty" to activate
 }
 
 /**
- * Close a specific VS Code window matching the worktree basename.
+ * Close the VS Code window for this worktree.
  * Raises the window then sends Cmd+Shift+W to close it.
  */
-export async function closeEditorWindow(worktreeBasename: string): Promise<void> {
+export async function closeEditorWindow(worktreePath: string): Promise<void> {
 	if (!(await isEditorRunning())) return;
-	const matches = await resolveWindowTitles(worktreeBasename);
-	const fullTitle = matches[0];
+	const matches = await resolveMatchingWindows(worktreePath);
+	const fullTitle = matches[0]?.title;
 	if (!fullTitle) return;
 	try {
 		const escapedTitle = escapeAppleScriptString(fullTitle);
@@ -349,7 +465,6 @@ end tell
 export async function closeAllEditors(): Promise<void> {
 	if (!(await isEditorRunning())) return;
 	try {
-		// Close each window one by one with Cmd+Shift+W (close window, not tab)
 		await runOsascript(`
 tell application "System Events"
 	tell process "Code"
@@ -368,24 +483,48 @@ end tell
 
 /**
  * Reposition managed VS Code windows to fill the area right of the sidebar.
- * Matching uses strict bounded matching (see windowMatchesWorktree) on the full
- * list of window titles, and only matched windows are repositioned.
+ * Matching prefers AXDocument (full path) over the worktree basename, so two
+ * sessions with the same basename across different repos do not collide.
  */
-export async function repositionAllEditors(managedBasenames: string[]): Promise<void> {
-	if (managedBasenames.length === 0) return;
+export interface ManagedWindow {
+	worktreePath: string;
+}
+
+export async function repositionAllEditors(managed: ManagedWindow[]): Promise<void> {
+	const debug = !!process.env.CCDOCK_DEBUG;
+	if (debug) {
+		process.stderr.write(
+			`[reposition] managed=${JSON.stringify(managed.map((m) => m.worktreePath))}\n`,
+		);
+	}
+	if (managed.length === 0) {
+		if (debug) process.stderr.write("[reposition] abort: no managed sessions\n");
+		return;
+	}
 	const [running, sidebar] = await Promise.all([isEditorRunning(), getSidebarBounds()]);
+	if (debug) {
+		process.stderr.write(
+			`[reposition] vscode_running=${running} sidebar=${JSON.stringify(sidebar)}\n`,
+		);
+	}
 	if (!running || !sidebar) return;
 
-	// Resolve basenames -> full window titles via JS-side strict matching
-	const allTitles = await listEditorWindows();
+	const allWindows = await listEditorWindows();
+	if (debug) {
+		process.stderr.write(`[reposition] windows=${JSON.stringify(allWindows)}\n`);
+	}
 	const matchedTitles = new Set<string>();
-	for (const title of allTitles) {
-		for (const basename of managedBasenames) {
-			if (windowMatchesWorktree(title, basename)) {
-				matchedTitles.add(title);
+	for (const w of allWindows) {
+		for (const m of managed) {
+			const basename = m.worktreePath.split("/").pop() ?? "";
+			if (windowMatches(w, m.worktreePath, basename)) {
+				matchedTitles.add(w.title);
 				break;
 			}
 		}
+	}
+	if (debug) {
+		process.stderr.write(`[reposition] matched=${JSON.stringify(Array.from(matchedTitles))}\n`);
 	}
 	if (matchedTitles.size === 0) return;
 

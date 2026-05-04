@@ -1,10 +1,12 @@
-import type { AgentState, AgentType } from "../types.ts";
+import { loadConfig } from "../config/config.ts";
+import type { AgentState, AgentType, HubConfig } from "../types.ts";
 import {
 	findSessionByPath,
 	readAgentState,
 	removeAgentFile,
 	writeAgentState,
 } from "../workspace/state.ts";
+import { postMacNotification, soundNameFromPath } from "./notify.ts";
 
 function sanitize(path: string): string {
 	return path.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
@@ -95,6 +97,48 @@ const STATUS_MAP: Record<string, string> = {
 	SessionEnd: "remove",
 };
 
+const ATTENTION_EVENTS = new Set(["PermissionRequest", "Notification"]);
+
+function pickSoundFile(eventName: string, sound: HubConfig["sound"]): string {
+	if (eventName === "PermissionRequest") return sound.permission_request;
+	return sound.notification;
+}
+
+/**
+ * Macos Notification Center plays its own sound, so when we post one we
+ * suppress the standalone afplay path to avoid a double-beep.
+ */
+function reactToEvent(eventName: string, payload: Record<string, unknown>): void {
+	if (process.env.CCDOCK_SILENT === "1") return;
+	if (process.platform !== "darwin") return;
+
+	const config = loadConfig();
+	const soundFile = pickSoundFile(eventName, config.sound);
+	const wantNotification =
+		config.notifications.enabled && config.notifications.events.includes(eventName);
+
+	if (wantNotification) {
+		const cwd = (payload.cwd as string) ?? "";
+		const toolName = (payload.tool_name as string) ?? "";
+		const message = (payload.message as string) ?? toolName ?? eventName;
+		postMacNotification({
+			title: `ccdock — ${eventName}`,
+			subtitle: cwd ? (cwd.split("/").pop() ?? "") : "",
+			message: message || eventName,
+			sound: config.sound.enabled ? soundNameFromPath(soundFile) : undefined,
+		});
+		return;
+	}
+
+	if (!ATTENTION_EVENTS.has(eventName)) return;
+	if (!config.sound.enabled || !soundFile) return;
+	try {
+		Bun.spawn(["afplay", soundFile], { stdout: "ignore", stderr: "ignore" });
+	} catch {
+		// afplay missing — ignore.
+	}
+}
+
 export async function handleHook(agentType: string, eventName: string): Promise<void> {
 	let payload: Record<string, unknown> = {};
 	try {
@@ -113,6 +157,14 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 		return;
 	}
 
+	// Subagents (Task tool) inherit a fresh session_id but are already represented
+	// by the parent's Task tool entry — writing a separate agent file would
+	// duplicate them as independent agents on the sidebar. Detect via
+	// parent_tool_use_id, which Claude Code sets only on subagent invocations.
+	if (payload.parent_tool_use_id) {
+		return;
+	}
+
 	const filename = `${sanitize(cwd)}-${claudeSessionId}.json`;
 
 	const mappedStatus = STATUS_MAP[eventName];
@@ -121,6 +173,11 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 		removeAgentFile(filename);
 		return;
 	}
+
+	// Audible / visual cue.
+	// Sounds always fire on PermissionRequest / Notification (legacy default);
+	// Mac notifications fire on whatever events the config subscribes to.
+	reactToEvent(eventName, payload);
 
 	// Notification doesn't carry meaningful status info — preserve previous state
 	if (eventName === "Notification") {
@@ -150,6 +207,8 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 		}
 	}
 
+	// Hook is spawned by the agent process, so process.ppid points at the agent.
+	// Sidebar uses this to sample CPU / memory via `ps`.
 	const state: AgentState = {
 		sessionId,
 		agentType: agentType as AgentType,
@@ -159,6 +218,7 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 		toolDetail,
 		cwd,
 		updatedAt: Date.now(),
+		pid: process.ppid,
 	};
 
 	writeAgentState(state, filename);

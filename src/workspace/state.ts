@@ -98,6 +98,19 @@ export function loadAgentStates(): AgentState[] {
 	return states;
 }
 
+function isProcessAlive(pid: number): boolean {
+	if (!Number.isFinite(pid) || pid <= 0) return false;
+	try {
+		// Signal 0 = liveness probe; throws ESRCH if the process is gone.
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		const e = err as NodeJS.ErrnoException;
+		// EPERM means the process exists but we can't signal it — still alive.
+		return e.code === "EPERM";
+	}
+}
+
 export function cleanStaleAgents(): void {
 	ensureDirs();
 	const agentsDir = getAgentsDir();
@@ -118,6 +131,14 @@ export function cleanStaleAgents(): void {
 				(parsed.sessionId && sessionIds.has(parsed.sessionId)) ||
 				sessionPaths.some((p) => parsed.cwd === p || parsed.cwd.startsWith(`${p}/`));
 			if (!hasSession) {
+				unlinkSync(filePath);
+				continue;
+			}
+
+			// Pid-based liveness: if we recorded a pid and the process is gone,
+			// the agent has exited. Codex doesn't fire SessionEnd, so without
+			// this check its entries linger forever.
+			if (typeof parsed.pid === "number" && !isProcessAlive(parsed.pid)) {
 				unlinkSync(filePath);
 				continue;
 			}

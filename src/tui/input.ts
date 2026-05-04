@@ -9,6 +9,7 @@ export type KeyAction =
 	| { type: "compact" }
 	| { type: "log" }
 	| { type: "realign" }
+	| { type: "window_close" }
 	| { type: "mouse_click"; row: number; col: number }
 	| { type: "unknown" };
 
@@ -89,6 +90,9 @@ export function parseKey(data: Buffer): KeyAction {
 
 	// Realign VS Code windows: r
 	if (s === "r") return { type: "realign" };
+
+	// Close VS Code window for the selected session (keep session/worktree): w
+	if (s === "w") return { type: "window_close" };
 
 	return { type: "unknown" };
 }

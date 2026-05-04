@@ -133,4 +133,17 @@ describe("ccdock hook", () => {
 			expect(readdirSync(agentsDir()).length).toBe(0);
 		}
 	});
+
+	test("subagent invocation (parent_tool_use_id present) is ignored", async () => {
+		await runHook("PreToolUse", {
+			session_id: "sess-child",
+			parent_tool_use_id: "tool-abc",
+			cwd: "/tmp/workspace/repo",
+			tool_name: "Bash",
+			tool_input: { command: "ls" },
+		});
+		if (existsSync(agentsDir())) {
+			expect(readdirSync(agentsDir()).length).toBe(0);
+		}
+	});
 });

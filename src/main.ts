@@ -31,6 +31,8 @@ KEYBINDINGS (sidebar):
   Enter/Tab   Focus editor window for selected session
   n           Create new session (wizard)
   d           Delete session
+  w           Close editor window only (keep session)
+  r           Realign all VS Code windows
   c           Toggle compact mode
   l           Toggle activity log
   q/Ctrl+C    Quit sidebar

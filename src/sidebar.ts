@@ -2,12 +2,11 @@ import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config/config.ts";
 import { CURSOR_HIDE, CURSOR_SHOW } from "./tui/ansi.ts";
 import {
-	repositionAllEditors,
-	closeAllEditors,
 	closeEditorWindow,
-	listEditorWindows,
 	getFocusedEditorWindow,
-	windowMatchesWorktree,
+	listEditorWindows,
+	repositionAllEditors,
+	windowMatches,
 } from "./workspace/window.ts";
 import { disableRawMode, enableRawMode, parseKey, parseKeyWizard } from "./tui/input.ts";
 import { renderSidebar } from "./tui/render.ts";
@@ -29,6 +28,7 @@ import {
 } from "./worktree/manager.ts";
 import { listRemoteBranches } from "./worktree/remote.ts";
 import { scanRepos } from "./worktree/scanner.ts";
+import { sampleProcessUsage } from "./agent/usage.ts";
 
 function sessionNameFromBranch(branchName: string): string {
 	const parts = branchName.split("/");
@@ -57,6 +57,25 @@ function createInitialState(): SidebarState {
 async function refreshSessions(state: SidebarState): Promise<void> {
 	const sessions = loadSessions();
 	const agentStates = loadAgentStates();
+
+	// Decorate live agents with current CPU% / memory so the TUI can show them.
+	const livePids = agentStates
+		.filter((a) => a.status === "running" || a.status === "waiting" || a.status === "idle")
+		.map((a) => a.pid)
+		.filter((p): p is number => typeof p === "number" && p > 0);
+	if (livePids.length > 0) {
+		const usage = await sampleProcessUsage(livePids);
+		for (const a of agentStates) {
+			const sample = a.pid ? usage.get(a.pid) : undefined;
+			if (sample) {
+				a.cpuPercent = sample.cpuPercent;
+				a.memoryMb = sample.memoryMb;
+			} else {
+				a.cpuPercent = undefined;
+				a.memoryMb = undefined;
+			}
+		}
+	}
 
 	// Match agent states to sessions by cwd prefix.
 	// Sort sessions by worktreePath length descending so that more specific
@@ -89,11 +108,11 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 
 	for (const session of sessions) {
 		const basename = session.worktreePath.split("/").pop() ?? "";
-		const hasWindow = editorWindows.some((w) => windowMatchesWorktree(w, basename));
+		const hasWindow = editorWindows.some((w) => windowMatches(w, session.worktreePath, basename));
 		if (
 			hasWindow &&
 			focusedEditor.isFrontmost &&
-			windowMatchesWorktree(focusedEditor.frontWindow, basename)
+			windowMatches(focusedEditor.frontWindow, session.worktreePath, basename)
 		) {
 			session.editorState = "focused";
 		} else if (hasWindow) {
@@ -555,8 +574,7 @@ async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Prom
 			// Perform the actual deletion asynchronously so the spinner stays responsive
 			void (async () => {
 				try {
-					const basename = worktreePath.split("/").pop() ?? "";
-					await closeEditorWindow(basename);
+					await closeEditorWindow(worktreePath);
 					deleteSession(sessionId);
 
 					if (removeWorktreeToo) {
@@ -593,11 +611,10 @@ async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Prom
 	}
 }
 
-function getManagedEditorBasenames(sessions: SidebarState["sessions"]): string[] {
+function getManagedWindows(sessions: SidebarState["sessions"]): { worktreePath: string }[] {
 	return sessions
 		.filter((s) => s.editorState !== "closed")
-		.map((s) => s.worktreePath.split("/").pop() ?? "")
-		.filter((t) => t.length > 0);
+		.map((s) => ({ worktreePath: s.worktreePath }));
 }
 
 export async function runSidebar(): Promise<void> {
@@ -617,7 +634,7 @@ export async function runSidebar(): Promise<void> {
 		state.rows = process.stdout.rows ?? 24;
 		state.cols = process.stdout.columns ?? 80;
 		render(state);
-		await repositionAllEditors(getManagedEditorBasenames(state.sessions));
+		await repositionAllEditors(getManagedWindows(state.sessions));
 	});
 
 	// Animation timer (200ms) — only repaint when there's something animating
@@ -672,8 +689,7 @@ export async function runSidebar(): Promise<void> {
 					if (state.quitConfirm.selectedIndex === 1) {
 						// Close VS Code windows for all managed sessions
 						for (const session of state.sessions) {
-							const basename = session.worktreePath.split("/").pop() ?? "";
-							await closeEditorWindow(basename);
+							await closeEditorWindow(session.worktreePath);
 						}
 					}
 					cleanup();
@@ -764,8 +780,16 @@ export async function runSidebar(): Promise<void> {
 				break;
 
 			case "realign":
-				await repositionAllEditors(getManagedEditorBasenames(state.sessions));
+				await repositionAllEditors(getManagedWindows(state.sessions));
 				break;
+
+			case "window_close": {
+				const session = state.sessions[state.selectedIndex];
+				if (session && !state.deletingSessionIds.has(session.id)) {
+					await closeEditorWindow(session.worktreePath);
+				}
+				break;
+			}
 
 			case "mouse_click": {
 				const clicked = state.cardRowRanges.find(

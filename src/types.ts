@@ -10,6 +10,9 @@ export interface AgentState {
 	toolDetail: string; // human-readable detail from tool_input
 	cwd: string;
 	updatedAt: number; // Date.now()
+	pid?: number; // process id of the agent (parent of the hook), used for ps lookup
+	cpuPercent?: number; // sampled by the sidebar from `ps -p <pid>`
+	memoryMb?: number; // RSS in MiB, also sampled from `ps`
 }
 
 export type EditorState = "focused" | "open" | "closed" | "launching";
@@ -108,7 +111,21 @@ export type WizardStep =
 
 export type WizardState = WizardStep | null;
 
+export interface SoundConfig {
+	enabled: boolean;
+	permission_request: string;
+	notification: string;
+}
+
+export interface NotificationsConfig {
+	enabled: boolean;
+	/** Hook event names that should pop a macOS Notification Center alert. */
+	events: string[];
+}
+
 export interface HubConfig {
 	workspace_dirs: string[];
 	editor: "code" | "cursor";
+	sound: SoundConfig;
+	notifications: NotificationsConfig;
 }

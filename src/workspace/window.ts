@@ -3,6 +3,8 @@
  * macOS native window management via AppleScript/System Events.
  */
 
+import { escapeAppleScriptString } from "./applescript.ts";
+
 interface WindowBounds {
 	x: number;
 	y: number;
@@ -23,9 +25,26 @@ export function windowMatchesWorktree(windowTitle: string, worktreeBasename: str
 	return re.test(windowTitle);
 }
 
-async function resolveWindowTitles(worktreeBasename: string): Promise<string[]> {
+/**
+ * Stronger identification when a `ccdock:<sessionId>` token has been baked
+ * into the window title via `.vscode/settings.json`. Falls back to the
+ * basename match for sessions created before the marker existed.
+ */
+export function windowMatchesSession(
+	windowTitle: string,
+	worktreeBasename: string,
+	sessionId: string | null,
+): boolean {
+	if (sessionId && windowTitle.includes(`ccdock:${sessionId}`)) return true;
+	return windowMatchesWorktree(windowTitle, worktreeBasename);
+}
+
+async function resolveWindowTitles(
+	worktreeBasename: string,
+	sessionId: string | null = null,
+): Promise<string[]> {
 	const titles = await listEditorWindows();
-	return titles.filter((t) => windowMatchesWorktree(t, worktreeBasename));
+	return titles.filter((t) => windowMatchesSession(t, worktreeBasename, sessionId));
 }
 
 async function runOsascript(script: string): Promise<string> {
@@ -138,10 +157,6 @@ result;
 	}
 }
 
-function escapeAppleScriptString(s: string): string {
-	return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
 /**
  * Move and resize a VS Code window to fill the area right of the sidebar.
  * The VS Code window is brought to the current space and positioned
@@ -152,8 +167,9 @@ function escapeAppleScriptString(s: string): string {
 export async function positionEditorWindow(
 	worktreeBasename: string,
 	sidebarBounds: WindowBounds,
+	sessionId: string | null = null,
 ): Promise<boolean> {
-	const matches = await resolveWindowTitles(worktreeBasename);
+	const matches = await resolveWindowTitles(worktreeBasename, sessionId);
 	const fullTitle = matches[0];
 	if (!fullTitle) return false;
 
@@ -192,8 +208,11 @@ end tell
 /**
  * Check if a VS Code window matching the worktree basename exists.
  */
-export async function editorWindowExists(worktreeBasename: string): Promise<boolean> {
-	const matches = await resolveWindowTitles(worktreeBasename);
+export async function editorWindowExists(
+	worktreeBasename: string,
+	sessionId: string | null = null,
+): Promise<boolean> {
+	const matches = await resolveWindowTitles(worktreeBasename, sessionId);
 	return matches.length > 0;
 }
 
@@ -201,8 +220,11 @@ export async function editorWindowExists(worktreeBasename: string): Promise<bool
  * Bring a VS Code window to front and position it next to the sidebar.
  * Returns false if no matching window exists.
  */
-export async function focusAndPositionEditor(worktreeBasename: string): Promise<boolean> {
-	const matches = await resolveWindowTitles(worktreeBasename);
+export async function focusAndPositionEditor(
+	worktreeBasename: string,
+	sessionId: string | null = null,
+): Promise<boolean> {
+	const matches = await resolveWindowTitles(worktreeBasename, sessionId);
 	const fullTitle = matches[0];
 	if (!fullTitle) return false;
 
@@ -226,7 +248,7 @@ tell application "System Events"
 end tell
 `);
 
-		await positionEditorWindow(worktreeBasename, sidebar);
+		await positionEditorWindow(worktreeBasename, sidebar, sessionId);
 		return true;
 	} catch {
 		return false;
@@ -316,9 +338,12 @@ tell application "Ghostty" to activate
  * Close a specific VS Code window matching the worktree basename.
  * Raises the window then sends Cmd+Shift+W to close it.
  */
-export async function closeEditorWindow(worktreeBasename: string): Promise<void> {
+export async function closeEditorWindow(
+	worktreeBasename: string,
+	sessionId: string | null = null,
+): Promise<void> {
 	if (!(await isEditorRunning())) return;
-	const matches = await resolveWindowTitles(worktreeBasename);
+	const matches = await resolveWindowTitles(worktreeBasename, sessionId);
 	const fullTitle = matches[0];
 	if (!fullTitle) return;
 	try {
@@ -368,11 +393,16 @@ end tell
 
 /**
  * Reposition managed VS Code windows to fill the area right of the sidebar.
- * Matching uses strict bounded matching (see windowMatchesWorktree) on the full
- * list of window titles, and only matched windows are repositioned.
+ * Matching prefers the per-session ccdock token in the title; basename match
+ * is the fallback for windows opened before the marker existed.
  */
-export async function repositionAllEditors(managedBasenames: string[]): Promise<void> {
-	if (managedBasenames.length === 0) return;
+export interface ManagedWindow {
+	basename: string;
+	sessionId: string | null;
+}
+
+export async function repositionAllEditors(managed: ManagedWindow[]): Promise<void> {
+	if (managed.length === 0) return;
 	const [running, sidebar] = await Promise.all([isEditorRunning(), getSidebarBounds()]);
 	if (!running || !sidebar) return;
 
@@ -380,8 +410,8 @@ export async function repositionAllEditors(managedBasenames: string[]): Promise<
 	const allTitles = await listEditorWindows();
 	const matchedTitles = new Set<string>();
 	for (const title of allTitles) {
-		for (const basename of managedBasenames) {
-			if (windowMatchesWorktree(title, basename)) {
+		for (const m of managed) {
+			if (windowMatchesSession(title, m.basename, m.sessionId)) {
 				matchedTitles.add(title);
 				break;
 			}

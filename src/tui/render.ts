@@ -96,13 +96,12 @@ function renderCard(
 	const detailColor = isClosed ? COLORS.editorClosed : COLORS.subtitle;
 	const dimAll = isClosed && !isDeleting ? DIM : "";
 
-	// Status dot: spinning for launching, green solid for open/focused, none for closed
+	// Status indicator: spinner only while the editor is launching.
+	// Per-agent dots are rendered below; the session itself does not get one.
 	let openDot = "";
 	if (isLaunching) {
 		const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
 		openDot = `${COLORS.waiting}${frame}${RESET} `;
-	} else if (!isClosed) {
-		openDot = `${COLORS.running}\u25cf${RESET} `;
 	}
 
 	// Card border top
@@ -140,8 +139,14 @@ function renderCard(
 				const sIcon = statusIcon(agent.status, animFrame);
 				const sColor = statusColor(agent.status);
 				const statusText = `${sColor}${sIcon} ${agent.status}${RESET}`;
-				const agentInfo = `${statusText} ${detailColor}${agent.agentType}${RESET}`;
-				const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(agentInfo, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+				let agentInfo = `${statusText} ${detailColor}${agent.agentType}${RESET}`;
+				if (typeof agent.cpuPercent === "number" || typeof agent.memoryMb === "number") {
+					const cpu =
+						typeof agent.cpuPercent === "number" ? `${agent.cpuPercent.toFixed(1)}%` : "—";
+					const mem = typeof agent.memoryMb === "number" ? `${agent.memoryMb}M` : "—";
+					agentInfo += ` ${COLORS.muted}cpu ${cpu} mem ${mem}${RESET}`;
+				}
+				const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(truncate(agentInfo, width - 4), width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 				lines.push(agentLine);
 
 				// Show latest tool activity
@@ -217,6 +222,7 @@ function renderFooter(cols: number): string[] {
 		`${BOLD}Enter${RESET} focus`,
 		`${BOLD}n${RESET} new`,
 		`${BOLD}d${RESET} del`,
+		`${BOLD}w${RESET} close win`,
 		`${BOLD}r${RESET} realign`,
 	].join(`${COLORS.muted} | ${RESET}`);
 	const line2 = [`${BOLD}c${RESET} compact`, `${BOLD}l${RESET} log`, `${BOLD}q${RESET} quit`].join(

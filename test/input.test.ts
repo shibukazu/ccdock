@@ -31,6 +31,7 @@ describe("parseKey (sidebar)", () => {
 		expect(parseKey(Buffer.from("c"))).toEqual({ type: "compact" });
 		expect(parseKey(Buffer.from("l"))).toEqual({ type: "log" });
 		expect(parseKey(Buffer.from("r"))).toEqual({ type: "realign" });
+		expect(parseKey(Buffer.from("w"))).toEqual({ type: "window_close" });
 	});
 
 	test("fullwidth shortcuts fire the same actions (IME on)", () => {

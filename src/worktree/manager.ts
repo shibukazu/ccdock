@@ -8,13 +8,13 @@ export interface CreateWorktreeOptions {
 	base?: string;
 }
 
-async function fetchOrigin(repoPath: string, base: string): Promise<void> {
+async function fetchOrigin(repoPath: string, base: string): Promise<boolean> {
 	const proc = Bun.spawn(["git", "-C", repoPath, "fetch", "origin", base], {
 		stdout: "ignore",
 		stderr: "pipe",
 	});
 	await proc.exited;
-	// Failures are non-fatal: creation continues with whatever refs are local.
+	return proc.exitCode === 0;
 }
 
 export async function createWorktree(
@@ -22,11 +22,17 @@ export async function createWorktree(
 	branchName: string,
 	opts: CreateWorktreeOptions = {},
 ): Promise<string> {
+	// When the user opted to "fetch origin first", branch from origin/<base>
+	// directly so the new worktree reflects the latest remote state — not
+	// whatever the local <base> happened to point at.
+	let baseRef: string | null = null;
 	if (opts.fetch && opts.base) {
-		await fetchOrigin(repoPath, opts.base);
+		const fetched = await fetchOrigin(repoPath, opts.base);
+		if (fetched) baseRef = `origin/${opts.base}`;
 	}
 
-	const proc = Bun.spawn(["git", "wt", branchName], {
+	const args = baseRef ? ["git", "wt", branchName, baseRef] : ["git", "wt", branchName];
+	const proc = Bun.spawn(args, {
 		cwd: repoPath,
 		stdout: "pipe",
 		stderr: "pipe",

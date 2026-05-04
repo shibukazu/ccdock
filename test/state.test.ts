@@ -129,6 +129,39 @@ describe("cleanStaleAgents", () => {
 		expect(existsSync(p)).toBe(false);
 	});
 
+	test("removes agent whose recorded pid is no longer alive (Codex cleanup)", async () => {
+		const { cleanStaleAgents } = await import(`../src/workspace/state.ts?t=${Date.now()}`);
+		writeSession(buildSession());
+		// PID 1 may be alive on some systems; pick a pid that is almost certainly gone.
+		const deadPid = 2 ** 22; // 4194304 — well above macOS pid_max defaults
+		const p = writeAgent(
+			"dead-codex.json",
+			buildAgent({
+				agentType: "codex",
+				status: "stopped",
+				pid: deadPid,
+				updatedAt: Date.now(),
+			}),
+		);
+		cleanStaleAgents();
+		expect(existsSync(p)).toBe(false);
+	});
+
+	test("keeps agent whose recorded pid is alive", async () => {
+		const { cleanStaleAgents } = await import(`../src/workspace/state.ts?t=${Date.now()}`);
+		writeSession(buildSession());
+		const p = writeAgent(
+			"live.json",
+			buildAgent({
+				status: "stopped",
+				pid: process.pid, // current process is definitely alive
+				updatedAt: Date.now(),
+			}),
+		);
+		cleanStaleAgents();
+		expect(existsSync(p)).toBe(true);
+	});
+
 	test("keeps agent whose cwd is a prefix of a known session worktreePath", async () => {
 		const { cleanStaleAgents } = await import(`../src/workspace/state.ts?t=${Date.now()}`);
 		writeSession(buildSession({ worktreePath: "/tmp/repo" }));

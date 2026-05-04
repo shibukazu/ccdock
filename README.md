@@ -59,14 +59,39 @@ Edit `~/.config/ccdock/config.json` (auto-created on first run):
 ```json
 {
   "workspace_dirs": ["~/workspace"],
-  "editor": "code"
+  "editor": "code",
+  "sound": {
+    "enabled": true,
+    "permission_request": "/System/Library/Sounds/Funk.aiff",
+    "notification": "/System/Library/Sounds/Glass.aiff"
+  },
+  "notifications": {
+    "enabled": true,
+    "events": ["PermissionRequest", "Notification"]
+  }
 }
 ```
 
-| Key              | Description                                               |
-| ---------------- | --------------------------------------------------------- |
-| `workspace_dirs` | Directories to scan for git repositories                  |
-| `editor`         | Editor command: `"code"` for VS Code, `"cursor"` for Cursor |
+| Key                        | Description                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------ |
+| `workspace_dirs`           | Directories to scan for git repositories                                             |
+| `editor`                   | Editor command: `"code"` for VS Code, `"cursor"` for Cursor                          |
+| `sound.enabled`            | Play a sound when an agent surfaces a `PermissionRequest` / `Notification`           |
+| `sound.permission_request` | Sound file (afplay-compatible) for permission prompts                                |
+| `sound.notification`       | Sound file for general notifications                                                 |
+| `notifications.enabled`    | Pop a macOS Notification Center alert in addition to the sound                       |
+| `notifications.events`     | Hook events that trigger an alert (`PermissionRequest`, `Notification`, `Stop`, ...) |
+
+When `notifications.enabled` is on, the sound is delivered by macOS as part of the alert — the standalone `afplay` path is suppressed for that event to avoid a double-beep.
+
+**Click-through** behavior depends on which backend ccdock can find:
+
+- If [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) is installed (`brew install terminal-notifier`), clicking **Show** activates Ghostty (the sidebar's terminal) so ccdock comes back to the foreground.
+- Otherwise ccdock falls back to `osascript display notification`. macOS attributes those alerts to Script Editor, so the **Show** button opens Script Editor — installing `terminal-notifier` is recommended for the better UX.
+
+Override the activated app with `CCDOCK_NOTIFY_BUNDLE_ID=<bundle.id>` (e.g. `com.googlecode.iterm2` for iTerm2). Set `CCDOCK_TERMINAL_NOTIFIER=/path/to/terminal-notifier` if it lives outside the standard Homebrew prefixes.
+
+Set `CCDOCK_SILENT=1` in the environment to mute every sound and notification regardless of config (handy for tests / quiet sessions). Other macOS system sounds live in `/System/Library/Sounds/` (Glass, Funk, Submarine, Ping, Sosumi, …).
 
 ### 2. Set up Claude Code hooks
 

@@ -2,12 +2,11 @@ import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config/config.ts";
 import { CURSOR_HIDE, CURSOR_SHOW } from "./tui/ansi.ts";
 import {
-	repositionAllEditors,
-	closeAllEditors,
 	closeEditorWindow,
-	listEditorWindows,
 	getFocusedEditorWindow,
-	windowMatchesSession,
+	listEditorWindows,
+	repositionAllEditors,
+	windowMatches,
 } from "./workspace/window.ts";
 import { disableRawMode, enableRawMode, parseKey, parseKeyWizard } from "./tui/input.ts";
 import { renderSidebar } from "./tui/render.ts";
@@ -30,7 +29,6 @@ import {
 import { listRemoteBranches } from "./worktree/remote.ts";
 import { scanRepos } from "./worktree/scanner.ts";
 import { sampleProcessUsage } from "./agent/usage.ts";
-import { writeWindowTitleMarker } from "./workspace/marker.ts";
 
 function sessionNameFromBranch(branchName: string): string {
 	const parts = branchName.split("/");
@@ -110,11 +108,11 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 
 	for (const session of sessions) {
 		const basename = session.worktreePath.split("/").pop() ?? "";
-		const hasWindow = editorWindows.some((w) => windowMatchesSession(w, basename, session.id));
+		const hasWindow = editorWindows.some((w) => windowMatches(w, session.worktreePath, basename));
 		if (
 			hasWindow &&
 			focusedEditor.isFrontmost &&
-			windowMatchesSession(focusedEditor.frontWindow, basename, session.id)
+			windowMatches(focusedEditor.frontWindow, session.worktreePath, basename)
 		) {
 			session.editorState = "focused";
 		} else if (hasWindow) {
@@ -512,10 +510,7 @@ async function createSessionFromPath(
 			lastActiveAt: Date.now(),
 		};
 		saveSession(session);
-		// Stamp a unique token into VS Code's window.title so that two sessions
-		// sharing the same branch basename across repos do not collide on focus.
-		writeWindowTitleMarker(worktreePath, session.id);
-		await openEditor(worktreePath, editor, session.id);
+		await openEditor(worktreePath, editor);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : "Unknown error";
 		process.stderr.write(`\nError creating session: ${msg}\n`);
@@ -579,8 +574,7 @@ async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Prom
 			// Perform the actual deletion asynchronously so the spinner stays responsive
 			void (async () => {
 				try {
-					const basename = worktreePath.split("/").pop() ?? "";
-					await closeEditorWindow(basename, sessionId);
+					await closeEditorWindow(worktreePath);
 					deleteSession(sessionId);
 
 					if (removeWorktreeToo) {
@@ -617,16 +611,10 @@ async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Prom
 	}
 }
 
-function getManagedWindows(
-	sessions: SidebarState["sessions"],
-): { basename: string; sessionId: string | null }[] {
+function getManagedWindows(sessions: SidebarState["sessions"]): { worktreePath: string }[] {
 	return sessions
 		.filter((s) => s.editorState !== "closed")
-		.map((s) => ({
-			basename: s.worktreePath.split("/").pop() ?? "",
-			sessionId: s.id,
-		}))
-		.filter((m) => m.basename.length > 0);
+		.map((s) => ({ worktreePath: s.worktreePath }));
 }
 
 export async function runSidebar(): Promise<void> {
@@ -701,8 +689,7 @@ export async function runSidebar(): Promise<void> {
 					if (state.quitConfirm.selectedIndex === 1) {
 						// Close VS Code windows for all managed sessions
 						for (const session of state.sessions) {
-							const basename = session.worktreePath.split("/").pop() ?? "";
-							await closeEditorWindow(basename, session.id);
+							await closeEditorWindow(session.worktreePath);
 						}
 					}
 					cleanup();
@@ -749,12 +736,12 @@ export async function runSidebar(): Promise<void> {
 			case "tab": {
 				const session = state.sessions[state.selectedIndex];
 				if (session && !state.deletingSessionIds.has(session.id)) {
-					const focused = await focusEditor(session.worktreePath, config.editor, session.id);
+					const focused = await focusEditor(session.worktreePath, config.editor);
 					if (!focused) {
 						// Show launching state while VS Code opens
 						session.editorState = "launching";
 						render(state);
-						await openEditor(session.worktreePath, config.editor, session.id);
+						await openEditor(session.worktreePath, config.editor);
 						session.editorState = "open";
 					}
 				}
@@ -799,8 +786,7 @@ export async function runSidebar(): Promise<void> {
 			case "window_close": {
 				const session = state.sessions[state.selectedIndex];
 				if (session && !state.deletingSessionIds.has(session.id)) {
-					const basename = session.worktreePath.split("/").pop() ?? "";
-					await closeEditorWindow(basename, session.id);
+					await closeEditorWindow(session.worktreePath);
 				}
 				break;
 			}
@@ -813,11 +799,11 @@ export async function runSidebar(): Promise<void> {
 					state.selectedIndex = clicked.sessionIndex;
 					const session = state.sessions[clicked.sessionIndex];
 					if (session && !state.deletingSessionIds.has(session.id)) {
-						const focused = await focusEditor(session.worktreePath, config.editor, session.id);
+						const focused = await focusEditor(session.worktreePath, config.editor);
 						if (!focused) {
 							session.editorState = "launching";
 							render(state);
-							await openEditor(session.worktreePath, config.editor, session.id);
+							await openEditor(session.worktreePath, config.editor);
 							session.editorState = "open";
 						}
 					}

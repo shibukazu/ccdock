@@ -139,14 +139,8 @@ function renderCard(
 				const sIcon = statusIcon(agent.status, animFrame);
 				const sColor = statusColor(agent.status);
 				const statusText = `${sColor}${sIcon} ${agent.status}${RESET}`;
-				let agentInfo = `${statusText} ${detailColor}${agent.agentType}${RESET}`;
-				if (typeof agent.cpuPercent === "number" || typeof agent.memoryMb === "number") {
-					const cpu =
-						typeof agent.cpuPercent === "number" ? `${agent.cpuPercent.toFixed(1)}%` : "—";
-					const mem = typeof agent.memoryMb === "number" ? `${agent.memoryMb}M` : "—";
-					agentInfo += ` ${COLORS.muted}cpu ${cpu} mem ${mem}${RESET}`;
-				}
-				const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(truncate(agentInfo, width - 4), width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+				const agentInfo = `${statusText} ${detailColor}${agent.agentType}${RESET}`;
+				const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(agentInfo, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 				lines.push(agentLine);
 
 				// Show latest tool activity
@@ -191,6 +185,22 @@ function renderCard(
 	lines.push(bottomBorder);
 
 	return lines;
+}
+
+function renderUsageSummary(state: SidebarState): string {
+	let totalCpu = 0;
+	let totalMem = 0;
+	let live = 0;
+	for (const session of state.sessions) {
+		for (const agent of session.agents) {
+			if (typeof agent.cpuPercent === "number") totalCpu += agent.cpuPercent;
+			if (typeof agent.memoryMb === "number") totalMem += agent.memoryMb;
+			if (typeof agent.pid === "number") live++;
+		}
+	}
+	const memText = totalMem >= 1024 ? `${(totalMem / 1024).toFixed(1)}G` : `${totalMem}M`;
+	const agentLabel = live === 1 ? "agent" : "agents";
+	return ` ${COLORS.muted}CPU${RESET} ${BOLD}${totalCpu.toFixed(1)}%${RESET} ${COLORS.muted}MEM${RESET} ${BOLD}${memText}${RESET} ${COLORS.muted}(${live} ${agentLabel})${RESET}`;
 }
 
 function renderActivityLog(state: SidebarState, maxLines: number): string[] {
@@ -280,7 +290,8 @@ export function renderSidebar(state: SidebarState): string {
 	const footerHeight = 3;
 	const headerHeight = 2;
 	const logHeight = state.showActivityLog ? Math.min(8, state.activityLog.length + 2) : 0;
-	const availableForCards = state.rows - headerHeight - footerHeight - logHeight;
+	const usageHeight = 1;
+	const availableForCards = state.rows - headerHeight - footerHeight - logHeight - usageHeight;
 
 	// Render session cards
 	let linesUsed = 0;
@@ -320,10 +331,13 @@ export function renderSidebar(state: SidebarState): string {
 
 	// Fill remaining space
 	const currentLines = output.length;
-	const targetLine = state.rows - footerHeight - logHeight;
+	const targetLine = state.rows - footerHeight - logHeight - usageHeight;
 	for (let i = currentLines; i < targetLine; i++) {
 		output.push("");
 	}
+
+	// Aggregate CPU / memory across all live agents
+	output.push(renderUsageSummary(state));
 
 	// Activity log
 	if (state.showActivityLog) {

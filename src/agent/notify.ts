@@ -54,7 +54,11 @@ function postViaTerminalNotifier(bin: string, opts: NotifyOptions): boolean {
 	if (opts.sound) args.push("-sound", opts.sound);
 
 	try {
-		Bun.spawn(args, { stdout: "ignore", stderr: "ignore" });
+		// Detach so the short-lived hook process can exit immediately instead of
+		// waiting for terminal-notifier's GUI bookkeeping to finish. Without this,
+		// the notification only surfaces after the hook returns (~hundreds of ms).
+		const proc = Bun.spawn(args, { stdout: "ignore", stderr: "ignore" });
+		proc.unref();
 		return true;
 	} catch {
 		return false;
@@ -71,7 +75,11 @@ function postViaOsascript(opts: NotifyOptions): void {
 
 	const script = `display notification "${message}" with title "${title}"${subtitleClause}${soundClause}`;
 	try {
-		Bun.spawn(["osascript", "-e", script], { stdout: "ignore", stderr: "ignore" });
+		const proc = Bun.spawn(["osascript", "-e", script], {
+			stdout: "ignore",
+			stderr: "ignore",
+		});
+		proc.unref();
 	} catch {
 		// osascript missing — silently ignore.
 	}

@@ -21,6 +21,7 @@ import {
 	DIM,
 	RESET,
 	clearLine,
+	formatMem,
 	moveCursor,
 	shortenHome,
 	statusColor,
@@ -187,7 +188,14 @@ function renderCard(
 	return lines;
 }
 
-function renderUsageSummary(state: SidebarState): string {
+const USAGE_LABEL_WIDTH = 6;
+
+function formatUsageRow(label: string, cpu: number, mem: number, suffix = ""): string {
+	const paddedLabel = padRight(label, USAGE_LABEL_WIDTH);
+	return ` ${COLORS.muted}${paddedLabel}${RESET} ${BOLD}${cpu.toFixed(1)}%${RESET} ${COLORS.muted}/${RESET} ${BOLD}${formatMem(mem)}${RESET}${suffix}`;
+}
+
+function renderUsageSummary(state: SidebarState): string[] {
 	let totalCpu = 0;
 	let totalMem = 0;
 	let live = 0;
@@ -198,9 +206,15 @@ function renderUsageSummary(state: SidebarState): string {
 			if (typeof agent.pid === "number") live++;
 		}
 	}
-	const memText = totalMem >= 1024 ? `${(totalMem / 1024).toFixed(1)}G` : `${totalMem}M`;
 	const agentLabel = live === 1 ? "agent" : "agents";
-	return ` ${COLORS.muted}CPU${RESET} ${BOLD}${totalCpu.toFixed(1)}%${RESET} ${COLORS.muted}MEM${RESET} ${BOLD}${memText}${RESET} ${COLORS.muted}(${live} ${agentLabel})${RESET}`;
+	const agentSuffix = ` ${COLORS.muted}(${live} ${agentLabel})${RESET}`;
+	const lines = [formatUsageRow("AGENT", totalCpu, totalMem, agentSuffix)];
+
+	const editor = state.editorUsage;
+	if (editor) {
+		lines.push(formatUsageRow("EDITOR", editor.cpuPercent, editor.memoryMb));
+	}
+	return lines;
 }
 
 function renderActivityLog(state: SidebarState, maxLines: number): string[] {
@@ -290,7 +304,8 @@ export function renderSidebar(state: SidebarState): string {
 	const footerHeight = 3;
 	const headerHeight = 2;
 	const logHeight = state.showActivityLog ? Math.min(8, state.activityLog.length + 2) : 0;
-	const usageHeight = 1;
+	const usageLines = renderUsageSummary(state);
+	const usageHeight = usageLines.length;
 	const availableForCards = state.rows - headerHeight - footerHeight - logHeight - usageHeight;
 
 	// Render session cards
@@ -336,8 +351,7 @@ export function renderSidebar(state: SidebarState): string {
 		output.push("");
 	}
 
-	// Aggregate CPU / memory across all live agents
-	output.push(renderUsageSummary(state));
+	output.push(...usageLines);
 
 	// Activity log
 	if (state.showActivityLog) {

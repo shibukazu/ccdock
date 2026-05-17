@@ -11,8 +11,8 @@ import {
 import { disableRawMode, enableRawMode, parseKey, parseKeyWizard } from "./tui/input.ts";
 import { renderSidebar } from "./tui/render.ts";
 import { renderWizard } from "./tui/wizard.ts";
-import type { AgentState, RepoInfo, SidebarState } from "./types.ts";
-import { focusEditor, openEditor } from "./workspace/editor.ts";
+import type { AgentState, HubConfig, RepoInfo, SidebarState } from "./types.ts";
+import { editorProcessPatterns, focusEditor, openEditor } from "./workspace/editor.ts";
 import {
 	cleanStaleAgents,
 	deleteSession,
@@ -28,14 +28,14 @@ import {
 } from "./worktree/manager.ts";
 import { listRemoteBranches } from "./worktree/remote.ts";
 import { scanRepos } from "./worktree/scanner.ts";
-import { sampleProcessUsage } from "./agent/usage.ts";
+import { sampleAppUsageByName, sampleProcessUsage } from "./agent/usage.ts";
 
 function sessionNameFromBranch(branchName: string): string {
 	const parts = branchName.split("/");
 	return parts[parts.length - 1] ?? branchName;
 }
 
-function createInitialState(): SidebarState {
+function createInitialState(editor: HubConfig["editor"]): SidebarState {
 	const [rows, cols] = [process.stdout.rows ?? 24, process.stdout.columns ?? 80];
 	return {
 		sessions: [],
@@ -51,6 +51,8 @@ function createInitialState(): SidebarState {
 		deleteConfirm: null,
 		quitConfirm: null,
 		deletingSessionIds: new Set(),
+		editor,
+		editorUsage: null,
 	};
 }
 
@@ -63,10 +65,18 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 		.filter((a) => a.status === "running" || a.status === "waiting" || a.status === "idle")
 		.map((a) => a.pid)
 		.filter((p): p is number => typeof p === "number" && p > 0);
+	// Skip the system-wide `ps -axo` scan when no session has an editor window
+	// open — saves the per-refresh cost on machines with hundreds of processes.
+	const needEditorUsage = state.sessions.some((s) => s.editorState !== "closed");
+	const [agentUsage, editorUsage] = await Promise.all([
+		livePids.length > 0 ? sampleProcessUsage(livePids) : Promise.resolve(new Map()),
+		needEditorUsage
+			? sampleAppUsageByName(editorProcessPatterns(state.editor))
+			: Promise.resolve(null),
+	]);
 	if (livePids.length > 0) {
-		const usage = await sampleProcessUsage(livePids);
 		for (const a of agentStates) {
-			const sample = a.pid ? usage.get(a.pid) : undefined;
+			const sample = a.pid ? agentUsage.get(a.pid) : undefined;
 			if (sample) {
 				a.cpuPercent = sample.cpuPercent;
 				a.memoryMb = sample.memoryMb;
@@ -76,6 +86,7 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 			}
 		}
 	}
+	state.editorUsage = editorUsage;
 
 	// Match agent states to sessions by cwd prefix.
 	// Sort sessions by worktreePath length descending so that more specific
@@ -619,7 +630,7 @@ function getManagedWindows(sessions: SidebarState["sessions"]): { worktreePath: 
 
 export async function runSidebar(): Promise<void> {
 	const config = loadConfig();
-	const state = createInitialState();
+	const state = createInitialState(config.editor);
 
 	// Initial load
 	await refreshSessions(state);

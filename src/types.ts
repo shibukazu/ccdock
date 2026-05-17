@@ -1,6 +1,11 @@
 export type AgentType = "claude-code" | "codex";
 export type AgentStatus = "running" | "waiting" | "idle" | "stopped" | "error" | "unknown";
 
+export interface ProcUsage {
+	cpuPercent: number;
+	memoryMb: number;
+}
+
 export interface AgentState {
 	sessionId: string;
 	agentType: AgentType;
@@ -13,6 +18,7 @@ export interface AgentState {
 	pid?: number; // process id of the agent (parent of the hook), used for ps lookup
 	cpuPercent?: number; // sampled by the sidebar from `ps -p <pid>`
 	memoryMb?: number; // RSS in MiB, also sampled from `ps`
+	lastNotifiedAt?: number; // Date.now() of the last notification/sound emitted for this agent
 }
 
 export type EditorState = "focused" | "open" | "closed" | "launching";
@@ -67,6 +73,8 @@ export interface SidebarState {
 	deleteConfirm: DeleteConfirm | null;
 	quitConfirm: { selectedIndex: number } | null; // 0=quit only, 1=quit+close editors
 	deletingSessionIds: Set<string>;
+	editor: HubConfig["editor"];
+	editorUsage: ProcUsage | null;
 }
 
 // Wizard steps for creating new sessions

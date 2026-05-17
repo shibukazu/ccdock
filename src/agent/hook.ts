@@ -99,6 +99,8 @@ const STATUS_MAP: Record<string, string> = {
 
 const ATTENTION_EVENTS = new Set(["PermissionRequest", "Notification"]);
 
+const NOTIFY_DEBOUNCE_MS = 3000;
+
 function pickSoundFile(eventName: string, sound: HubConfig["sound"]): string {
 	if (eventName === "PermissionRequest") return sound.permission_request;
 	return sound.notification;
@@ -107,10 +109,23 @@ function pickSoundFile(eventName: string, sound: HubConfig["sound"]): string {
 /**
  * Macos Notification Center plays its own sound, so when we post one we
  * suppress the standalone afplay path to avoid a double-beep.
+ *
+ * Skips emission entirely when the previous alert for this agent fired within
+ * NOTIFY_DEBOUNCE_MS — Claude Code can emit Notification (idle_prompt) and
+ * Stop back-to-back at turn end, which would otherwise double-beep.
+ *
+ * Returns true when a notification or sound was emitted so the caller can
+ * record `lastNotifiedAt`.
  */
-function reactToEvent(eventName: string, payload: Record<string, unknown>): void {
-	if (process.env.CCDOCK_SILENT === "1") return;
-	if (process.platform !== "darwin") return;
+function reactToEvent(
+	eventName: string,
+	payload: Record<string, unknown>,
+	lastNotifiedAt: number | undefined,
+	now: number,
+): boolean {
+	if (process.env.CCDOCK_SILENT === "1") return false;
+	if (process.platform !== "darwin") return false;
+	if (lastNotifiedAt !== undefined && now - lastNotifiedAt < NOTIFY_DEBOUNCE_MS) return false;
 
 	const config = loadConfig();
 	const soundFile = pickSoundFile(eventName, config.sound);
@@ -127,15 +142,23 @@ function reactToEvent(eventName: string, payload: Record<string, unknown>): void
 			message: message || eventName,
 			sound: config.sound.enabled ? soundNameFromPath(soundFile) : undefined,
 		});
-		return;
+		return true;
 	}
 
-	if (!ATTENTION_EVENTS.has(eventName)) return;
-	if (!config.sound.enabled || !soundFile) return;
+	if (!ATTENTION_EVENTS.has(eventName)) return false;
+	if (!config.sound.enabled || !soundFile) return false;
 	try {
-		Bun.spawn(["afplay", soundFile], { stdout: "ignore", stderr: "ignore" });
+		// Detach so the hook can return without blocking on afplay's playback
+		// duration — otherwise the parent agent waits for the sound to finish.
+		const proc = Bun.spawn(["afplay", soundFile], {
+			stdout: "ignore",
+			stderr: "ignore",
+		});
+		proc.unref();
+		return true;
 	} catch {
 		// afplay missing — ignore.
+		return false;
 	}
 }
 
@@ -174,17 +197,19 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 		return;
 	}
 
-	// Audible / visual cue.
 	// Sounds always fire on PermissionRequest / Notification (legacy default);
 	// Mac notifications fire on whatever events the config subscribes to.
-	reactToEvent(eventName, payload);
+	const prevState = readAgentState(filename);
+	const now = Date.now();
+	const emitted = reactToEvent(eventName, payload, prevState?.lastNotifiedAt, now);
+	const lastNotifiedAt = emitted ? now : prevState?.lastNotifiedAt;
 
 	// Notification doesn't carry meaningful status info — preserve previous state
 	if (eventName === "Notification") {
-		const prev = readAgentState(filename);
-		if (prev) {
-			prev.updatedAt = Date.now();
-			writeAgentState(prev, filename);
+		if (prevState) {
+			prevState.updatedAt = now;
+			if (lastNotifiedAt !== undefined) prevState.lastNotifiedAt = lastNotifiedAt;
+			writeAgentState(prevState, filename);
 		}
 		return;
 	}
@@ -199,12 +224,9 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 	// but clear them on Stop (stopped) since the agent is no longer doing anything
 	let toolName = rawToolName;
 	let toolDetail = rawToolDetail;
-	if (!toolName && status !== "stopped") {
-		const prev = readAgentState(filename);
-		if (prev) {
-			toolName = prev.toolName ?? "";
-			toolDetail = prev.toolDetail ?? "";
-		}
+	if (!toolName && status !== "stopped" && prevState) {
+		toolName = prevState.toolName ?? "";
+		toolDetail = prevState.toolDetail ?? "";
 	}
 
 	// Hook is spawned by the agent process, so process.ppid points at the agent.
@@ -217,8 +239,9 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 		toolName,
 		toolDetail,
 		cwd,
-		updatedAt: Date.now(),
+		updatedAt: now,
 		pid: process.ppid,
+		lastNotifiedAt,
 	};
 
 	writeAgentState(state, filename);

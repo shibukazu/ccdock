@@ -125,6 +125,10 @@ export function truncate(str: string, maxLen: number): string {
 	return result;
 }
 
+export function formatMem(mb: number): string {
+	return mb >= 1024 ? `${(mb / 1024).toFixed(1)}G` : `${mb}M`;
+}
+
 export function shortenHome(path: string): string {
 	const home = process.env.HOME ?? "";
 	if (home && path.startsWith(home)) {

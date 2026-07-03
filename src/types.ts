@@ -87,6 +87,7 @@ export type WizardStep =
 			worktrees: WorktreeEntry[];
 			selectedIndex: number;
 			repos: RepoInfo[];
+			filter: string;
 	  }
 	| { step: "fetch-choice"; repo: RepoInfo; selectedIndex: number; repos: RepoInfo[] }
 	| {

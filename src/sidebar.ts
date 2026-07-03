@@ -9,6 +9,7 @@ import {
 	windowMatches,
 } from "./workspace/window.ts";
 import { disableRawMode, enableRawMode, parseKey, parseKeyWizard } from "./tui/input.ts";
+import { matchesFilter } from "./tui/list.ts";
 import { renderSidebar } from "./tui/render.ts";
 import { renderWizard } from "./tui/wizard.ts";
 import type { AgentState, HubConfig, RepoInfo, SidebarState } from "./types.ts";
@@ -193,9 +194,7 @@ async function handleWizardInput(
 
 	switch (wizard.step) {
 		case "select-repo": {
-			const filtered = wizard.repos.filter((r) =>
-				r.name.toLowerCase().includes(wizard.filter.toLowerCase()),
-			);
+			const filtered = wizard.repos.filter((r) => matchesFilter(r.name, wizard.filter));
 			switch (key.type) {
 				case "up":
 					wizard.selectedIndex = Math.max(0, wizard.selectedIndex - 1);
@@ -255,6 +254,7 @@ async function handleWizardInput(
 							worktrees: worktrees,
 							selectedIndex: 0,
 							repos: wizard.repos,
+							filter: "",
 						};
 					} else if (wizard.selectedIndex === 2) {
 						// Open repository root
@@ -285,15 +285,21 @@ async function handleWizardInput(
 			break;
 		}
 		case "select-worktree": {
+			const filtered = wizard.worktrees.filter(
+				(wt) => matchesFilter(wt.branch, wizard.filter) || matchesFilter(wt.path, wizard.filter),
+			);
 			switch (key.type) {
 				case "up":
 					wizard.selectedIndex = Math.max(0, wizard.selectedIndex - 1);
 					break;
 				case "down":
-					wizard.selectedIndex = Math.min(wizard.worktrees.length - 1, wizard.selectedIndex + 1);
+					wizard.selectedIndex = Math.min(
+						Math.max(0, filtered.length - 1),
+						wizard.selectedIndex + 1,
+					);
 					break;
 				case "enter": {
-					const selected = wizard.worktrees[wizard.selectedIndex];
+					const selected = filtered[wizard.selectedIndex];
 					if (selected) {
 						const repo = wizard.repo;
 						state.wizard = {
@@ -318,6 +324,14 @@ async function handleWizardInput(
 						selectedIndex: 1,
 						repos: wizard.repos,
 					};
+					break;
+				case "backspace":
+					wizard.filter = wizard.filter.slice(0, -1);
+					wizard.selectedIndex = 0;
+					break;
+				case "char":
+					wizard.filter += key.char;
+					wizard.selectedIndex = 0;
 					break;
 			}
 			break;

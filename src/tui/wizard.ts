@@ -1,5 +1,6 @@
 import type { RepoInfo, WizardState, WorktreeEntry } from "../types.ts";
 import { BOLD, BOX, CLEAR_SCREEN, COLORS, CURSOR_HOME, DIM, RESET, truncate } from "./ansi.ts";
+import { matchesFilter } from "./list.ts";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -20,7 +21,7 @@ function renderRepoList(
 		lines.push("");
 	}
 
-	const filtered = repos.filter((r) => r.name.toLowerCase().includes(filter.toLowerCase()));
+	const filtered = repos.filter((r) => matchesFilter(r.name, filter));
 
 	if (filtered.length === 0) {
 		lines.push(`${DIM}  No repos matching "${filter}"${RESET}`);
@@ -40,7 +41,7 @@ function renderRepoList(
 	}
 
 	lines.push("");
-	lines.push(`${COLORS.muted}  j/k: navigate | Enter: select | Esc: cancel${RESET}`);
+	lines.push(`${COLORS.muted}  ↑/↓: navigate | Enter: select | Esc: cancel${RESET}`);
 	lines.push(`${COLORS.muted}  Type to filter repos${RESET}`);
 
 	return lines;
@@ -84,6 +85,7 @@ function renderWorktreeList(
 	repo: RepoInfo,
 	worktrees: WorktreeEntry[],
 	selectedIndex: number,
+	filter: string,
 	cols: number,
 ): string[] {
 	const lines: string[] = [];
@@ -92,11 +94,24 @@ function renderWorktreeList(
 	lines.push(`${BOLD}${COLORS.highlight} Select Worktree: ${repo.name}${RESET}`);
 	lines.push("");
 
-	if (worktrees.length === 0) {
-		lines.push(`${DIM}  No existing worktrees found.${RESET}`);
+	if (filter) {
+		lines.push(`${COLORS.muted}  Filter: ${RESET}${filter}`);
+		lines.push("");
+	}
+
+	const filtered = worktrees.filter(
+		(wt) => matchesFilter(wt.branch, filter) || matchesFilter(wt.path, filter),
+	);
+
+	if (filtered.length === 0) {
+		lines.push(
+			filter
+				? `${DIM}  No worktrees matching "${filter}"${RESET}`
+				: `${DIM}  No existing worktrees found.${RESET}`,
+		);
 	} else {
-		for (let i = 0; i < worktrees.length; i++) {
-			const wt = worktrees[i];
+		for (let i = 0; i < filtered.length; i++) {
+			const wt = filtered[i];
 			if (!wt) continue;
 			const isSelected = i === selectedIndex;
 			const marker = isSelected ? `${COLORS.highlight}\u25b6${RESET}` : " ";
@@ -110,7 +125,8 @@ function renderWorktreeList(
 	}
 
 	lines.push("");
-	lines.push(`${COLORS.muted}  j/k: navigate | Enter: select | Esc: back${RESET}`);
+	lines.push(`${COLORS.muted}  ↑/↓: navigate | Enter: select | Esc: back${RESET}`);
+	lines.push(`${COLORS.muted}  Type to filter worktrees${RESET}`);
 
 	return lines;
 }
@@ -215,7 +231,13 @@ export function renderWizard(wizard: WizardState, cols: number, animFrame = 0): 
 			content = renderModeSelect(wizard.repo, wizard.selectedIndex, cols);
 			break;
 		case "select-worktree":
-			content = renderWorktreeList(wizard.repo, wizard.worktrees, wizard.selectedIndex, cols);
+			content = renderWorktreeList(
+				wizard.repo,
+				wizard.worktrees,
+				wizard.selectedIndex,
+				wizard.filter,
+				cols,
+			);
 			break;
 		case "fetch-choice":
 			content = renderFetchChoice(wizard.repo, wizard.selectedIndex, cols);

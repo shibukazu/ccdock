@@ -366,18 +366,7 @@ async function handleWizardInput(
 					} else if (wizard.selectedIndex === 2) {
 						// Open repository root
 						const repo = wizard.repo;
-						const pendingId = randomUUID().slice(0, 8);
-						state.pendingCreations.push({
-							id: pendingId,
-							repoName: repo.name,
-							branch: repo.defaultBranch,
-							message: "Opening editor...",
-							status: "creating",
-							createdAt: Date.now(),
-						});
-						state.wizard = null;
-						render(state);
-						void runCreation(state, pendingId, () =>
+						startPendingCreation(state, repo.name, repo.defaultBranch, "Opening editor...", () =>
 							createSessionFromPath(repo, repo.path, repo.defaultBranch, config.editor),
 						);
 					}
@@ -411,18 +400,7 @@ async function handleWizardInput(
 					const selected = filtered[wizard.selectedIndex];
 					if (selected) {
 						const repo = wizard.repo;
-						const pendingId = randomUUID().slice(0, 8);
-						state.pendingCreations.push({
-							id: pendingId,
-							repoName: repo.name,
-							branch: selected.branch,
-							message: "Opening editor...",
-							status: "creating",
-							createdAt: Date.now(),
-						});
-						state.wizard = null;
-						render(state);
-						void runCreation(state, pendingId, () =>
+						startPendingCreation(state, repo.name, selected.branch, "Opening editor...", () =>
 							createSessionFromPath(repo, selected.path, selected.branch, config.editor),
 						);
 					}
@@ -489,18 +467,8 @@ async function handleWizardInput(
 						const repo = wizard.repo;
 						const branch = wizard.branchName.trim();
 						const fetchBefore = wizard.fetchBeforeCreate;
-						const pendingId = randomUUID().slice(0, 8);
-						state.pendingCreations.push({
-							id: pendingId,
-							repoName: repo.name,
-							branch,
-							message: fetchBefore ? "Fetching origin..." : "Creating worktree...",
-							status: "creating",
-							createdAt: Date.now(),
-						});
-						state.wizard = null;
-						render(state);
-						void runCreation(state, pendingId, () =>
+						const message = fetchBefore ? "Fetching origin..." : "Creating worktree...";
+						startPendingCreation(state, repo.name, branch, message, () =>
 							createSession(repo, branch, config.editor, fetchBefore),
 						);
 					}
@@ -524,6 +492,29 @@ async function handleWizardInput(
 			break;
 		}
 	}
+}
+
+// Push a "creating" overlay card, drop back to the main screen immediately,
+// and run the session-creating operation in the background.
+function startPendingCreation(
+	state: SidebarState,
+	repoName: string,
+	branch: string,
+	message: string,
+	op: () => Promise<void>,
+): void {
+	const pendingId = randomUUID().slice(0, 8);
+	state.pendingCreations.push({
+		id: pendingId,
+		repoName,
+		branch,
+		message,
+		status: "creating",
+		createdAt: Date.now(),
+	});
+	state.wizard = null;
+	render(state);
+	void runCreation(state, pendingId, op);
 }
 
 async function runCreation(

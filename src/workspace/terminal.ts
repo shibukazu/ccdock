@@ -19,10 +19,10 @@
  * itself.
  */
 
-import { escapeAppleScriptString } from "./applescript.ts";
+import { escapeAppleScriptString, runOsascript } from "./applescript.ts";
 // Deferred (function-body) usage only, so the window.ts <-> terminal.ts
 // import cycle is safe at module-initialization time.
-import { getScreenRightEdge } from "./window.ts";
+import { getScreenRightEdge, getSidebarBounds } from "./window.ts";
 
 interface WindowBounds {
 	x: number;
@@ -42,22 +42,6 @@ export interface TerminalWindow {
 
 const FIELD_SEP = "<<F>>";
 const ROW_SEP = "<<R>>";
-
-async function runOsascript(script: string): Promise<string> {
-	const proc = Bun.spawn(["osascript", "-e", script], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [out, err] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-	]);
-	await proc.exited;
-	if (proc.exitCode !== 0 && err.trim() && process.env.CCDOCK_DEBUG) {
-		process.stderr.write(`[terminal osascript] ${err.trim()}\n`);
-	}
-	return out.trim();
-}
 
 async function isTerminalRunning(): Promise<boolean> {
 	try {
@@ -181,37 +165,6 @@ tell application "Ghostty"
 end tell
 `);
 		return result.length > 0 ? result : null;
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Sidebar window bounds via System Events, matched by the sidebar's current
- * title so we never read the bounds of a Ghostty window we don't own. Falls back
- * to the front Ghostty window when the sidebar id/name cannot be resolved
- * (ccdock launched outside Ghostty).
- */
-async function getSidebarBounds(sidebarWindowId: string | null): Promise<WindowBounds | null> {
-	try {
-		const sidebarName = await ghosttyWindowNameForId(sidebarWindowId);
-		const selector =
-			sidebarName && sidebarName.length > 0
-				? `set w to (first window whose name is "${escapeAppleScriptString(sidebarName)}")`
-				: "set w to front window";
-		const result = await runOsascript(`
-tell application "System Events"
-	tell process "ghostty"
-		${selector}
-		set p to position of w
-		set s to size of w
-		return "" & (item 1 of p) & "," & (item 2 of p) & "," & (item 1 of s) & "," & (item 2 of s)
-	end tell
-end tell
-`);
-		const parts = result.split(",").map((s) => Number.parseInt(s.trim(), 10));
-		if (parts.length < 4 || parts.some((n) => Number.isNaN(n))) return null;
-		return { x: parts[0]!, y: parts[1]!, width: parts[2]!, height: parts[3]! };
 	} catch {
 		return null;
 	}

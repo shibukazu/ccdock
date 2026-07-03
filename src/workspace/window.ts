@@ -10,7 +10,7 @@
  *   title is the fallback.
  */
 
-import { escapeAppleScriptString } from "./applescript.ts";
+import { escapeAppleScriptString, runOsascript } from "./applescript.ts";
 import { ghosttyWindowNameForId } from "./terminal.ts";
 
 interface WindowBounds {
@@ -96,22 +96,6 @@ async function resolveMatchingWindows(worktreePath: string): Promise<EditorWindo
 	const basename = worktreePath.split("/").pop() ?? "";
 	const windows = await listEditorWindows();
 	return windows.filter((w) => windowMatches(w, worktreePath, basename));
-}
-
-async function runOsascript(script: string): Promise<string> {
-	const proc = Bun.spawn(["osascript", "-e", script], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [out, err] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-	]);
-	await proc.exited;
-	if (proc.exitCode !== 0 && err.trim() && process.env.CCDOCK_DEBUG) {
-		process.stderr.write(`[osascript] ${err.trim()}\n`);
-	}
-	return out.trim();
 }
 
 async function runJXA(script: string): Promise<string> {

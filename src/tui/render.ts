@@ -109,6 +109,11 @@ function renderWindowCloseConfirm(target: WindowCloseConfirm["target"]): string[
 	return lines;
 }
 
+/** One card body row: content padded to the card width between vertical borders. */
+function boxLine(content: string, width: number, borderColor: string, dimAll = ""): string {
+	return `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(content, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+}
+
 function renderPendingCard(pending: PendingCreation, cols: number, animFrame: number): string[] {
 	const lines: string[] = [];
 	const width = Math.max(cols - 2, 20);
@@ -122,20 +127,20 @@ function renderPendingCard(pending: PendingCreation, cols: number, animFrame: nu
 	const icon = isError ? "✕" : SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
 	const titleText = `${titleColor}${icon} ${pending.repoName}:${pending.branch}${RESET}`;
 	const titleTruncated = truncate(titleText, width - 4);
-	const titleLine = `${borderColor}${BOX.vertical}${RESET} ${padRight(titleTruncated, width - 4)}${RESET} ${borderColor}${BOX.vertical}${RESET}`;
+	const titleLine = boxLine(titleTruncated, width, borderColor);
 	lines.push(titleLine);
 
 	if (isError) {
 		const errMsg = pending.errorMessage ?? "Unknown error";
 		const errTruncated = truncate(`${COLORS.error}${errMsg}${RESET}`, width - 4);
-		const errLine = `${borderColor}${BOX.vertical}${RESET} ${padRight(errTruncated, width - 4)}${RESET} ${borderColor}${BOX.vertical}${RESET}`;
+		const errLine = boxLine(errTruncated, width, borderColor);
 		lines.push(errLine);
 
 		const hint = `${COLORS.muted}(press d to dismiss)${RESET}`;
-		const hintLine = `${borderColor}${BOX.vertical}${RESET} ${padRight(hint, width - 4)}${RESET} ${borderColor}${BOX.vertical}${RESET}`;
+		const hintLine = boxLine(hint, width, borderColor);
 		lines.push(hintLine);
 	} else {
-		const msgLine = `${borderColor}${BOX.vertical}${RESET} ${padRight(pending.message, width - 4)}${RESET} ${borderColor}${BOX.vertical}${RESET}`;
+		const msgLine = boxLine(pending.message, width, borderColor);
 		lines.push(msgLine);
 	}
 
@@ -245,11 +250,11 @@ function renderCard(
 		if (isDeleting) {
 			const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
 			const deleteText = `${COLORS.error}${frame} Deleting session...${RESET}`;
-			const deleteLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(deleteText, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+			const deleteLine = boxLine(deleteText, width, borderColor, dimAll);
 			lines.push(deleteLine);
 		} else if (session.agents.length === 0) {
 			const noAgent = `${DIM}no agents${RESET}`;
-			const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(noAgent, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+			const agentLine = boxLine(noAgent, width, borderColor, dimAll);
 			lines.push(agentLine);
 		} else {
 			for (const agent of session.agents) {
@@ -258,7 +263,7 @@ function renderCard(
 				const sColor = statusColor(agent.status);
 				const typeIcon = `${sColor}${agentTypeIcon(agent.agentType)}${RESET}`;
 				const agentInfo = `${badge} ${typeIcon} ${detailColor}${agent.agentType}${RESET}`;
-				const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(agentInfo, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+				const agentLine = boxLine(agentInfo, width, borderColor, dimAll);
 				lines.push(agentLine);
 
 				// Show latest tool activity
@@ -267,7 +272,7 @@ function renderCard(
 						? `${detailColor}${agent.toolName}${RESET} ${detailColor}${agent.toolDetail}${RESET}`
 						: `${detailColor}${agent.toolName}${RESET}`;
 					const detailTruncated = truncate(`  ${detail}`, width - 4);
-					const detailLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(detailTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+					const detailLine = boxLine(detailTruncated, width, borderColor, dimAll);
 					lines.push(detailLine);
 				}
 			}
@@ -278,7 +283,7 @@ function renderCard(
 			const badgeText = diffBadgeText(diff);
 			if (badgeText) {
 				const diffTruncated = truncate(badgeText, width - 4);
-				const diffLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(diffTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+				const diffLine = boxLine(diffTruncated, width, borderColor, dimAll);
 				lines.push(diffLine);
 			}
 		}
@@ -300,7 +305,7 @@ function renderCard(
 			if (badgeText) agentSummary = `${agentSummary}  ${badgeText}`;
 		}
 		const compactSummary = truncate(agentSummary, width - 4);
-		const compactLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(compactSummary, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+		const compactLine = boxLine(compactSummary, width, borderColor, dimAll);
 		lines.push(compactLine);
 	}
 
@@ -308,7 +313,7 @@ function renderCard(
 	if (isSelected && deleteConfirm && deleteConfirm.sessionId === session.id) {
 		const confirmLines = renderDeleteConfirm(deleteConfirm);
 		for (const cl of confirmLines) {
-			const confirmLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(cl, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+			const confirmLine = boxLine(cl, width, borderColor, dimAll);
 			lines.push(confirmLine);
 		}
 	}
@@ -317,7 +322,7 @@ function renderCard(
 	if (isSelected && windowCloseConfirm && windowCloseConfirm.sessionId === session.id) {
 		const confirmLines = renderWindowCloseConfirm(windowCloseConfirm.target);
 		for (const cl of confirmLines) {
-			const confirmLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(cl, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+			const confirmLine = boxLine(cl, width, borderColor, dimAll);
 			lines.push(confirmLine);
 		}
 	}

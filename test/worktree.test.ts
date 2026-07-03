@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { listWorktrees, removeWorktree } from "../src/worktree/manager.ts";
 
 // These tests only cover operations that don't require git-wt.
-// createWorktree / createWorktreeFromRemote call out to `git wt` which is an
-// external dependency and is exercised via manual E2E.
+// createWorktree calls out to `git wt` which is an external dependency and
+// is exercised via manual E2E.
 
 let root: string;
 let repo: string;

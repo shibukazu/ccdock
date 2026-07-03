@@ -57,10 +57,6 @@ function renderModeSelect(repo: RepoInfo, selectedIndex: number, cols: number): 
 
 	const modes = [
 		{ label: "Create new worktree (git wt)", desc: "Create a new feature branch worktree" },
-		{
-			label: "Create worktree from remote branch",
-			desc: "Check out an existing origin/* branch",
-		},
 		{ label: "Use existing worktree", desc: "Select from existing worktrees" },
 		{ label: "Open repository root", desc: "Open the main repository directory" },
 	];
@@ -185,81 +181,6 @@ function renderFetchChoice(repo: RepoInfo, selectedIndex: number, cols: number):
 	return lines;
 }
 
-function renderRemoteBranchList(
-	repo: RepoInfo,
-	branches: string[],
-	selectedIndex: number,
-	filter: string,
-	cols: number,
-): string[] {
-	const lines: string[] = [];
-	const width = Math.max(cols - 4, 20);
-
-	lines.push(`${BOLD}${COLORS.highlight} Select Remote Branch: ${repo.name}${RESET}`);
-	lines.push(`${COLORS.muted}  (local cache — run \`git fetch\` in a shell to refresh)${RESET}`);
-	lines.push("");
-
-	if (filter) {
-		lines.push(`${COLORS.muted}  Filter: ${RESET}${filter}`);
-		lines.push("");
-	}
-
-	const filtered = branches.filter((b) => b.toLowerCase().includes(filter.toLowerCase()));
-
-	if (filtered.length === 0) {
-		lines.push(
-			`${DIM}  ${branches.length === 0 ? "No remote branches in local cache." : `No branches matching "${filter}"`}${RESET}`,
-		);
-	} else {
-		for (let i = 0; i < filtered.length; i++) {
-			const branch = filtered[i];
-			if (!branch) continue;
-			const isSelected = i === selectedIndex;
-			const marker = isSelected ? `${COLORS.highlight}\u25b6${RESET}` : " ";
-			const label = isSelected
-				? `${BOLD}${COLORS.title}${branch}${RESET}`
-				: `${COLORS.subtitle}${branch}${RESET}`;
-			lines.push(truncate(` ${marker} ${label}`, width));
-		}
-	}
-
-	lines.push("");
-	lines.push(`${COLORS.muted}  j/k: navigate | Enter: select | Esc: back${RESET}`);
-	lines.push(`${COLORS.muted}  Type to filter branches${RESET}`);
-
-	return lines;
-}
-
-function renderLocalBranchInput(
-	repo: RepoInfo,
-	remoteRef: string,
-	localBranch: string,
-	cols: number,
-): string[] {
-	const lines: string[] = [];
-	const width = Math.max(cols - 4, 20);
-
-	lines.push(`${BOLD}${COLORS.highlight} Create Session: ${repo.name}${RESET}`);
-	lines.push("");
-	lines.push(`${COLORS.muted}  From: ${remoteRef}${RESET}`);
-	lines.push(`${COLORS.muted}  Enter local branch name:${RESET}`);
-	lines.push("");
-	lines.push(`  ${COLORS.border}${BOX.horizontal.repeat(width - 6)}${RESET}`);
-	lines.push(`  ${BOLD}${localBranch}${RESET}\u2588`);
-	lines.push(`  ${COLORS.border}${BOX.horizontal.repeat(width - 6)}${RESET}`);
-	lines.push("");
-
-	if (localBranch) {
-		const preview = `${repo.name}--${localBranch.replace(/\//g, "-")}`;
-		lines.push(`${COLORS.muted}  Worktree dir: ${preview}${RESET}`);
-	}
-
-	lines.push("");
-	lines.push(`${COLORS.muted}  Enter: create | Esc: back${RESET}`);
-
-	return lines;
-}
-
 function renderCreating(
 	repo: RepoInfo,
 	message: string,
@@ -301,18 +222,6 @@ export function renderWizard(wizard: WizardState, cols: number, animFrame = 0): 
 			break;
 		case "enter-branch":
 			content = renderBranchInput(wizard.repo, wizard.branchName, wizard.fetchBeforeCreate, cols);
-			break;
-		case "select-remote-branch":
-			content = renderRemoteBranchList(
-				wizard.repo,
-				wizard.branches,
-				wizard.selectedIndex,
-				wizard.filter,
-				cols,
-			);
-			break;
-		case "enter-local-branch":
-			content = renderLocalBranchInput(wizard.repo, wizard.remoteRef, wizard.localBranch, cols);
 			break;
 		case "creating":
 			content = renderCreating(wizard.repo, wizard.message, cols, animFrame);

@@ -97,21 +97,6 @@ export type WizardStep =
 			repos: RepoInfo[];
 	  }
 	| {
-			step: "select-remote-branch";
-			repo: RepoInfo;
-			branches: string[];
-			selectedIndex: number;
-			filter: string;
-			repos: RepoInfo[];
-	  }
-	| {
-			step: "enter-local-branch";
-			repo: RepoInfo;
-			remoteRef: string;
-			localBranch: string;
-			repos: RepoInfo[];
-	  }
-	| {
 			step: "creating";
 			repo: RepoInfo;
 			message: string;

@@ -20,13 +20,7 @@ import {
 	loadSessions,
 	saveSession,
 } from "./workspace/state.ts";
-import {
-	createWorktree,
-	createWorktreeFromRemote,
-	listWorktrees,
-	removeWorktree,
-} from "./worktree/manager.ts";
-import { listRemoteBranches } from "./worktree/remote.ts";
+import { createWorktree, listWorktrees, removeWorktree } from "./worktree/manager.ts";
 import { scanRepos } from "./worktree/scanner.ts";
 import { sampleAppUsageByName, sampleProcessUsage } from "./agent/usage.ts";
 
@@ -241,7 +235,7 @@ async function handleWizardInput(
 					wizard.selectedIndex = Math.max(0, wizard.selectedIndex - 1);
 					break;
 				case "down":
-					wizard.selectedIndex = Math.min(3, wizard.selectedIndex + 1);
+					wizard.selectedIndex = Math.min(2, wizard.selectedIndex + 1);
 					break;
 				case "enter":
 					if (wizard.selectedIndex === 0) {
@@ -253,17 +247,6 @@ async function handleWizardInput(
 							repos: wizard.repos,
 						};
 					} else if (wizard.selectedIndex === 1) {
-						// From remote branch — fetch and show remote branches
-						const branches = await listRemoteBranches(wizard.repo.path);
-						state.wizard = {
-							step: "select-remote-branch",
-							repo: wizard.repo,
-							branches,
-							selectedIndex: 0,
-							filter: "",
-							repos: wizard.repos,
-						};
-					} else if (wizard.selectedIndex === 2) {
 						// Use existing worktree
 						const worktrees = await listWorktrees(wizard.repo.path);
 						state.wizard = {
@@ -273,7 +256,7 @@ async function handleWizardInput(
 							selectedIndex: 0,
 							repos: wizard.repos,
 						};
-					} else if (wizard.selectedIndex === 3) {
+					} else if (wizard.selectedIndex === 2) {
 						// Open repository root
 						const repo = wizard.repo;
 						state.wizard = {
@@ -332,7 +315,7 @@ async function handleWizardInput(
 					state.wizard = {
 						step: "select-mode",
 						repo: wizard.repo,
-						selectedIndex: 2,
+						selectedIndex: 1,
 						repos: wizard.repos,
 					};
 					break;
@@ -406,95 +389,6 @@ async function handleWizardInput(
 			}
 			break;
 		}
-		case "select-remote-branch": {
-			const filteredBranches = wizard.branches.filter((b) =>
-				b.toLowerCase().includes(wizard.filter.toLowerCase()),
-			);
-			switch (key.type) {
-				case "up":
-					wizard.selectedIndex = Math.max(0, wizard.selectedIndex - 1);
-					break;
-				case "down":
-					wizard.selectedIndex = Math.min(
-						Math.max(0, filteredBranches.length - 1),
-						wizard.selectedIndex + 1,
-					);
-					break;
-				case "enter": {
-					const selected = filteredBranches[wizard.selectedIndex];
-					if (selected) {
-						state.wizard = {
-							step: "enter-local-branch",
-							repo: wizard.repo,
-							remoteRef: selected,
-							localBranch: selected.replace(/^origin\//, ""),
-							repos: wizard.repos,
-						};
-					}
-					break;
-				}
-				case "escape":
-					state.wizard = {
-						step: "select-mode",
-						repo: wizard.repo,
-						selectedIndex: 1,
-						repos: wizard.repos,
-					};
-					break;
-				case "backspace":
-					wizard.filter = wizard.filter.slice(0, -1);
-					wizard.selectedIndex = 0;
-					break;
-				case "char":
-					wizard.filter += key.char;
-					wizard.selectedIndex = 0;
-					break;
-			}
-			break;
-		}
-		case "enter-local-branch": {
-			switch (key.type) {
-				case "enter": {
-					if (wizard.localBranch.trim()) {
-						const repo = wizard.repo;
-						const localBranch = wizard.localBranch.trim();
-						const remoteRef = wizard.remoteRef;
-						state.wizard = {
-							step: "creating",
-							repo,
-							message: "Creating worktree from remote...",
-						};
-						render(state);
-						void (async () => {
-							await createSessionFromRemote(repo, localBranch, remoteRef, config.editor);
-							state.wizard = null;
-							await refreshSessions(state);
-							render(state);
-						})();
-					}
-					break;
-				}
-				case "escape":
-					state.wizard = {
-						step: "select-remote-branch",
-						repo: wizard.repo,
-						branches: [],
-						selectedIndex: 0,
-						filter: "",
-						repos: wizard.repos,
-					};
-					// re-fetch branches lazily — simpler to re-run the list now
-					state.wizard.branches = await listRemoteBranches(wizard.repo.path);
-					break;
-				case "backspace":
-					wizard.localBranch = wizard.localBranch.slice(0, -1);
-					break;
-				case "char":
-					wizard.localBranch += key.char;
-					break;
-			}
-			break;
-		}
 		case "creating":
 			// Ignore all input while creating — operation is in progress
 			break;
@@ -543,21 +437,6 @@ async function createSession(
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : "Unknown error";
 		process.stderr.write(`\nError creating session: ${msg}\n`);
-	}
-}
-
-async function createSessionFromRemote(
-	repo: RepoInfo,
-	localBranch: string,
-	remoteRef: string,
-	editor: string,
-): Promise<void> {
-	try {
-		const worktreePath = await createWorktreeFromRemote(repo.path, localBranch, remoteRef);
-		await createSessionFromPath(repo, worktreePath, localBranch, editor);
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : "Unknown error";
-		process.stderr.write(`\nError creating session from remote: ${msg}\n`);
 	}
 }
 

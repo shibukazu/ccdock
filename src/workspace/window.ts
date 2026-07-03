@@ -11,6 +11,7 @@
  */
 
 import { escapeAppleScriptString } from "./applescript.ts";
+import { ghosttyWindowNameForId } from "./terminal.ts";
 
 interface WindowBounds {
 	x: number;
@@ -124,14 +125,26 @@ async function runJXA(script: string): Promise<string> {
 }
 
 /**
- * Get the bounds of the sidebar terminal window (the frontmost Ghostty window).
+ * Get the bounds of the sidebar terminal window.
+ *
+ * When the sidebar's own Ghostty window id is known, we resolve its current
+ * title and target that specific window (System Events process name is the
+ * lowercase `ghostty`). Otherwise we fall back to the frontmost Ghostty window,
+ * which is the historical behavior for ccdock launched outside Ghostty.
  */
-export async function getSidebarBounds(): Promise<WindowBounds | null> {
+export async function getSidebarBounds(
+	sidebarWindowId: string | null = null,
+): Promise<WindowBounds | null> {
 	try {
+		const sidebarName = await ghosttyWindowNameForId(sidebarWindowId);
+		const selector =
+			sidebarName && sidebarName.length > 0
+				? `set w to (first window whose name is "${escapeAppleScriptString(sidebarName)}")`
+				: "set w to front window";
 		const result = await runOsascript(`
 tell application "System Events"
-	tell process "Ghostty"
-		set w to front window
+	tell process "ghostty"
+		${selector}
 		set p to position of w
 		set s to size of w
 		return "" & (item 1 of p) & "," & (item 2 of p) & "," & (item 1 of s) & "," & (item 2 of s)
@@ -139,7 +152,7 @@ tell application "System Events"
 end tell
 `);
 		const parts = result.split(",").map((s) => Number.parseInt(s.trim(), 10));
-		if (parts.length < 4) return null;
+		if (parts.length < 4 || parts.some((n) => Number.isNaN(n))) return null;
 		return { x: parts[0]!, y: parts[1]!, width: parts[2]!, height: parts[3]! };
 	} catch {
 		return null;
@@ -160,7 +173,7 @@ end tell
  *   nsX = asX + nsMinX          (nsMinX = min x across all NSScreens)
  *   nsY = primaryH - asCenterY  (Y axis is flipped)
  */
-async function getScreenRightEdge(sidebar: WindowBounds): Promise<number> {
+export async function getScreenRightEdge(sidebar: WindowBounds): Promise<number> {
 	// Fallback: typical MacBook Pro screen width from the sidebar's right edge
 	const fallback = 1512;
 	try {
@@ -262,12 +275,15 @@ export async function editorWindowExists(worktreePath: string): Promise<boolean>
  * Bring the VS Code window for this worktree to front and position it next
  * to the sidebar. Returns false if no matching window exists.
  */
-export async function focusAndPositionEditor(worktreePath: string): Promise<boolean> {
+export async function focusAndPositionEditor(
+	worktreePath: string,
+	sidebarWindowId: string | null = null,
+): Promise<boolean> {
 	const matches = await resolveMatchingWindows(worktreePath);
 	const fullTitle = matches[0]?.title;
 	if (!fullTitle) return false;
 
-	const sidebar = await getSidebarBounds();
+	const sidebar = await getSidebarBounds(sidebarWindowId);
 	if (!sidebar) return false;
 
 	try {
@@ -418,11 +434,23 @@ return (isFront as text) & "${FIELD_SEP}" & wName & "${FIELD_SEP}" & wDoc
 	}
 }
 
-export async function focusSidebar(): Promise<void> {
+export async function focusSidebar(sidebarWindowId: string | null = null): Promise<void> {
 	try {
-		await runOsascript(`
+		if (sidebarWindowId) {
+			const escapedId = escapeAppleScriptString(sidebarWindowId);
+			await runOsascript(`
+tell application "Ghostty"
+	activate
+	try
+		activate window id "${escapedId}"
+	end try
+end tell
+`);
+		} else {
+			await runOsascript(`
 tell application "Ghostty" to activate
 `);
+		}
 	} catch {
 		// Ghostty not available
 	}
@@ -490,7 +518,10 @@ export interface ManagedWindow {
 	worktreePath: string;
 }
 
-export async function repositionAllEditors(managed: ManagedWindow[]): Promise<void> {
+export async function repositionAllEditors(
+	managed: ManagedWindow[],
+	sidebarWindowId: string | null = null,
+): Promise<void> {
 	const debug = !!process.env.CCDOCK_DEBUG;
 	if (debug) {
 		process.stderr.write(
@@ -501,7 +532,10 @@ export async function repositionAllEditors(managed: ManagedWindow[]): Promise<vo
 		if (debug) process.stderr.write("[reposition] abort: no managed sessions\n");
 		return;
 	}
-	const [running, sidebar] = await Promise.all([isEditorRunning(), getSidebarBounds()]);
+	const [running, sidebar] = await Promise.all([
+		isEditorRunning(),
+		getSidebarBounds(sidebarWindowId),
+	]);
 	if (debug) {
 		process.stderr.write(
 			`[reposition] vscode_running=${running} sidebar=${JSON.stringify(sidebar)}\n`,

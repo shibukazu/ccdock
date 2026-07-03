@@ -19,7 +19,11 @@ export function editorProcessPatterns(editor: HubConfig["editor"]): string[] {
 	return EDITOR_PROCESS_PATTERNS[editor] ?? EDITOR_PROCESS_PATTERNS.code;
 }
 
-export async function openEditor(worktreePath: string, editor: string): Promise<void> {
+export async function openEditor(
+	worktreePath: string,
+	editor: string,
+	sidebarWindowId: string | null = null,
+): Promise<void> {
 	Bun.spawn([editor, "--new-window", worktreePath], {
 		stdout: "ignore",
 		stderr: "ignore",
@@ -31,12 +35,16 @@ export async function openEditor(worktreePath: string, editor: string): Promise<
 		if (await editorWindowExists(worktreePath)) break;
 	}
 
-	const sidebar = await getSidebarBounds();
+	const sidebar = await getSidebarBounds(sidebarWindowId);
 	if (sidebar) {
 		await positionEditorWindow(worktreePath, sidebar);
 	}
 }
 
-export async function focusEditor(worktreePath: string, _editor: string): Promise<boolean> {
-	return focusAndPositionEditor(worktreePath);
+export async function focusEditor(
+	worktreePath: string,
+	_editor: string,
+	sidebarWindowId: string | null = null,
+): Promise<boolean> {
+	return focusAndPositionEditor(worktreePath, sidebarWindowId);
 }

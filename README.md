@@ -60,6 +60,7 @@ Edit `~/.config/ccdock/config.json` (auto-created on first run):
 {
   "workspace_dirs": ["~/workspace"],
   "editor": "code",
+  "terminal": "ghostty",
   "sound": {
     "enabled": true,
     "permission_request": "/System/Library/Sounds/Funk.aiff",
@@ -76,6 +77,7 @@ Edit `~/.config/ccdock/config.json` (auto-created on first run):
 | -------------------------- | ------------------------------------------------------------------------------------ |
 | `workspace_dirs`           | Directories to scan for git repositories                                             |
 | `editor`                   | Editor command: `"code"` for VS Code, `"cursor"` for Cursor                          |
+| `terminal`                 | Work-terminal app for the `t` keybinding. Only `"ghostty"` is supported today         |
 | `sound.enabled`            | Play a sound when an agent surfaces a `PermissionRequest` / `Notification`           |
 | `sound.permission_request` | Sound file (afplay-compatible) for permission prompts                                |
 | `sound.notification`       | Sound file for general notifications                                                 |
@@ -176,8 +178,10 @@ ccdock help     # show help
 | `Tab`        | Focus editor window (same as Enter)     |
 | `n`          | Create new session (interactive wizard) |
 | `d`          | Delete session                          |
+| `t`          | Open / focus the worktree terminal (Ghostty) |
 | `w`          | Close editor window (with confirmation) |
-| `r`          | Realign all VS Code windows             |
+| `W`          | Close terminal window (with confirmation) |
+| `r`          | Realign all editor + terminal windows   |
 | `c`          | Toggle compact mode                     |
 | `l`          | Toggle activity log                     |
 | `q` / Ctrl+C | Quit (with option to close editors)    |
@@ -188,10 +192,20 @@ ccdock help     # show help
 
 | Card appearance | Meaning |
 | --------------- | ------- |
-| White border + green `●` | Editor is focused |
-| Normal border + green `●` | Editor is open but not focused |
+| White border | Editor or terminal is focused |
+| Normal border | Editor or terminal is open but not focused |
 | Spinning `⠋` indicator | Editor is launching |
-| Dim border, no dot | Editor is closed |
+| Spinning `⠋T` badge | Terminal is launching |
+| Teal `●T` badge | Terminal is open (white when focused) |
+| Dim border, no badge | Editor and terminal both closed |
+
+### Terminal windows
+
+Pressing `t` opens (or focuses) a [Ghostty](https://ghostty.org/) terminal whose working directory is the selected session's worktree, and manages it next to the sidebar just like an editor window (position, focus, close, realign). Terminals are matched to worktrees by the shell's working directory, so same-named branches across different repositories never collide.
+
+- The first time ccdock scripts Ghostty, macOS shows an **Automation** permission prompt ("ccdock wants to control Ghostty"). Approve it (also under System Settings → Privacy & Security → Automation) so terminal management works.
+- ccdock captures its own Ghostty window at startup and never closes or repositions it — only worktree terminals are managed.
+- Ghostty must be installed and available as `com.mitchellh.ghostty`. If ccdock is launched from a different terminal, terminal management is disabled gracefully.
 
 ### Agent status
 
@@ -231,6 +245,7 @@ src/
   config/config.ts     — Config (~/.config/ccdock/)
   workspace/state.ts   — Session/agent state persistence
   workspace/editor.ts  — VS Code open/focus
+  workspace/terminal.ts— Ghostty terminal open/focus/close/reposition
   workspace/window.ts  — AppleScript window management
   worktree/manager.ts  — Git worktree operations
   worktree/scanner.ts  — Repository discovery

@@ -31,6 +31,7 @@ export interface WorkspaceSession {
 	repoName: string; // extracted from path
 	agents: AgentState[]; // populated from state files
 	editorState: EditorState; // VS Code window state
+	terminalState: EditorState; // Ghostty terminal window state (reuses EditorState)
 	createdAt: number;
 	lastActiveAt: number;
 }
@@ -65,6 +66,8 @@ export interface DeleteConfirm {
 export interface WindowCloseConfirm {
 	sessionId: string;
 	worktreePath: string;
+	/** Which managed window to close. Defaults to the editor for backward compatibility. */
+	target: "editor" | "terminal";
 }
 
 export interface SidebarState {
@@ -92,6 +95,13 @@ export interface SidebarState {
 	pendingCreations: PendingCreation[];
 	editor: HubConfig["editor"];
 	editorUsage: ProcUsage | null;
+	/**
+	 * Ghostty window id of the sidebar's own terminal, captured once at startup.
+	 * ccdock runs inside Ghostty, so this window must be excluded from every
+	 * list/close/reposition/focus operation. null when ccdock is not running
+	 * inside Ghostty (e.g. launched from a different terminal).
+	 */
+	sidebarWindowId: string | null;
 }
 
 // Wizard steps for creating new sessions
@@ -132,6 +142,8 @@ export interface NotificationsConfig {
 export interface HubConfig {
 	workspace_dirs: string[];
 	editor: "code" | "cursor";
+	/** Terminal app used for per-worktree work terminals. Only Ghostty is supported today. */
+	terminal: "ghostty";
 	sound: SoundConfig;
 	notifications: NotificationsConfig;
 }

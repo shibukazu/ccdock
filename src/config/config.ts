@@ -36,6 +36,7 @@ const DEFAULT_NOTIFICATIONS: NotificationsConfig = {
 const DEFAULT_CONFIG: HubConfig = {
 	workspace_dirs: ["~/workspace"],
 	editor: "code",
+	terminal: "ghostty",
 	sound: DEFAULT_SOUND,
 	notifications: DEFAULT_NOTIFICATIONS,
 };
@@ -83,6 +84,7 @@ function resolveConfig(config: Partial<HubConfig>): HubConfig {
 			.map(expandTilde)
 			.filter((dir) => existsSync(dir)),
 		editor: config.editor ?? "code",
+		terminal: config.terminal ?? "ghostty",
 		sound,
 		notifications,
 	};

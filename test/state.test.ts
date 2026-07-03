@@ -45,6 +45,7 @@ function buildSession(overrides: Partial<WorkspaceSession> = {}): WorkspaceSessi
 		repoName: "repo",
 		agents: [],
 		editorState: "open",
+		terminalState: "closed",
 		createdAt: 0,
 		lastActiveAt: 0,
 		...overrides,

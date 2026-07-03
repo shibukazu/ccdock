@@ -47,7 +47,12 @@ function ensureDirs(): void {
 export function saveSession(session: WorkspaceSession): void {
 	ensureDirs();
 	const filePath = join(getSessionsDir(), `${session.id}.json`);
-	const { agents: _agents, editorState: _editorState, ...serializable } = session;
+	const {
+		agents: _agents,
+		editorState: _editorState,
+		terminalState: _terminalState,
+		...serializable
+	} = session;
 	writeFileSync(filePath, JSON.stringify(serializable, null, 2));
 }
 
@@ -63,6 +68,7 @@ export function loadSessions(): WorkspaceSession[] {
 			const parsed = JSON.parse(raw) as WorkspaceSession;
 			parsed.agents = [];
 			parsed.editorState = parsed.editorState ?? "closed";
+			parsed.terminalState = parsed.terminalState ?? "closed";
 			sessions.push(parsed);
 		} catch {
 			// Skip malformed files

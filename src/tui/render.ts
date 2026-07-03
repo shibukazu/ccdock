@@ -67,10 +67,11 @@ function renderDeleteConfirm(deleteConfirm: DeleteConfirm): string[] {
 	return lines;
 }
 
-function renderWindowCloseConfirm(): string[] {
+function renderWindowCloseConfirm(target: WindowCloseConfirm["target"]): string[] {
 	const lines: string[] = [];
 
-	lines.push(`  ${BOLD}${COLORS.waiting} Close editor window?${RESET}`);
+	const heading = target === "terminal" ? "Close terminal window?" : "Close editor window?";
+	lines.push(`  ${BOLD}${COLORS.waiting} ${heading}${RESET}`);
 	lines.push(`  ${COLORS.subtitle}Session and worktree will be kept${RESET}`);
 	lines.push("");
 	lines.push(`  ${COLORS.muted}Enter: close | Esc: cancel${RESET}`);
@@ -134,10 +135,14 @@ function renderCard(
 	// Closed: dim everything
 	// Deleting: error-colored border, spinner
 	const editorState = session.editorState;
-	const isFocused = editorState === "focused";
-	const isClosed = editorState === "closed";
+	const terminalState = session.terminalState;
+	const isFocused = editorState === "focused" || terminalState === "focused";
+	// "Closed" (dim) styling only applies when both the editor and terminal are
+	// closed — an open terminal keeps the card visually active.
+	const isClosed = editorState === "closed" && terminalState === "closed";
 	const isLaunching = editorState === "launching";
-	// Border color: Deleting > VS Code focused > J/K selected > closed/open
+	const isTerminalLaunching = terminalState === "launching";
+	// Border color: Deleting > editor/terminal focused > J/K selected > closed/open
 	const borderColor = isDeleting
 		? COLORS.error
 		: isFocused
@@ -151,12 +156,23 @@ function renderCard(
 	const detailColor = isClosed ? COLORS.editorClosed : COLORS.subtitle;
 	const dimAll = isClosed && !isDeleting ? DIM : "";
 
-	// Status indicator: spinner only while the editor is launching.
+	// Status indicators on the title line:
+	//   - editor: spinner while launching (state is otherwise shown via border).
+	//   - terminal: a `T` badge — spinner while launching, teal when open/focused.
 	// Per-agent dots are rendered below; the session itself does not get one.
 	let openDot = "";
 	if (isLaunching) {
 		const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
 		openDot = `${COLORS.waiting}${frame}${RESET} `;
+	}
+	let terminalDot = "";
+	if (isTerminalLaunching) {
+		const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
+		terminalDot = `${COLORS.waiting}${frame}T${RESET} `;
+	} else if (terminalState === "focused") {
+		terminalDot = `${COLORS.editorFocused}●T${RESET} `;
+	} else if (terminalState === "open") {
+		terminalDot = `${COLORS.stopped}●T${RESET} `;
 	}
 
 	// Card border top
@@ -167,7 +183,7 @@ function renderCard(
 	const icon = "\uf418";
 	const sessionNum = `${COLORS.muted}#${sessionIndex + 1}${RESET} `;
 	const titleText = `${titleColor}${icon} ${session.repoName}:${session.branch}${RESET}`;
-	const title = `${sessionNum}${openDot}${titleText}`;
+	const title = `${sessionNum}${openDot}${terminalDot}${titleText}`;
 	const titleTruncated = truncate(title, width - 4);
 	const titleLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(titleTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 	lines.push(titleLine);
@@ -176,7 +192,7 @@ function renderCard(
 		// Path line
 		const shortPath = shortenHome(session.worktreePath);
 		const pathTruncated = truncate(shortPath, width - 4);
-		const pathColor = editorState === "closed" ? COLORS.editorClosed : COLORS.subtitle;
+		const pathColor = isClosed ? COLORS.editorClosed : COLORS.subtitle;
 		const pathLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${pathColor}${padRight(pathTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 		lines.push(pathLine);
 
@@ -237,7 +253,7 @@ function renderCard(
 
 	// Window close confirmation inline
 	if (isSelected && windowCloseConfirm && windowCloseConfirm.sessionId === session.id) {
-		const confirmLines = renderWindowCloseConfirm();
+		const confirmLines = renderWindowCloseConfirm(windowCloseConfirm.target);
 		for (const cl of confirmLines) {
 			const confirmLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(cl, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 			lines.push(confirmLine);
@@ -309,7 +325,9 @@ function renderFooter(cols: number): string[] {
 		`${BOLD}Enter${RESET} focus`,
 		`${BOLD}n${RESET} new`,
 		`${BOLD}d${RESET} del`,
-		`${BOLD}w${RESET} close win`,
+		`${BOLD}t${RESET} term`,
+		`${BOLD}w${RESET} close ed`,
+		`${BOLD}W${RESET} close term`,
 		`${BOLD}r${RESET} realign`,
 	].join(`${COLORS.muted} | ${RESET}`);
 	const line2 = [`${BOLD}c${RESET} compact`, `${BOLD}l${RESET} log`, `${BOLD}q${RESET} quit`].join(
@@ -330,8 +348,8 @@ function renderQuitConfirm(selectedIndex: number, cols: number): string[] {
 	lines.push("");
 
 	const options = [
-		"Quit sidebar only (keep VS Code open)",
-		"Quit sidebar and close all VS Code windows",
+		"Quit sidebar only (keep editors and terminals open)",
+		"Quit sidebar and close all editor and terminal windows",
 	];
 
 	for (let i = 0; i < options.length; i++) {

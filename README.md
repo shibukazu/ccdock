@@ -93,6 +93,15 @@ Override the activated app with `CCDOCK_NOTIFY_BUNDLE_ID=<bundle.id>` (e.g. `com
 
 Set `CCDOCK_SILENT=1` in the environment to mute every sound and notification regardless of config (handy for tests / quiet sessions). Other macOS system sounds live in `/System/Library/Sounds/` (Glass, Funk, Submarine, Ping, Sosumi, …).
 
+### Fast notifications (recommended)
+
+Claude Code can also notify you directly, without going through ccdock's hooks. In iTerm2, Ghostty, or Kitty, the `preferredNotifChannel` setting in `~/.claude/settings.json` (default `"auto"`) uses terminal OSC escape sequences (OSC 9 / 777) to pop a desktop notification instantly. Add `"preferredNotifChannel": "auto"` to `settings.json` if you want to set it explicitly.
+
+- On Ghostty, set `desktop-notifications = true` in `~/.config/ghostty/config` (some versions default to on already).
+- Over tmux, add `set -g allow-passthrough on` to `~/.tmux.conf` so the escape sequence reaches the outer terminal.
+
+This path is faster than ccdock's hook-based notifications (`terminal-notifier`/`osascript`) since it skips spawning a hook process and registering with Notification Center. If you enable it, avoid double notifications by setting `notifications.enabled` to `false` (or trimming `notifications.events`) in `~/.config/ccdock/config.json`. ccdock's `terminal-notifier`/`osascript` path remains useful as a fallback for environments without OSC support, such as the VS Code integrated terminal.
+
 ### 2. Set up Claude Code hooks
 
 Add to `~/.claude/settings.json` to enable agent status monitoring:

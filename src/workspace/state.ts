@@ -25,7 +25,7 @@ function getSessionsDir(): string {
 	return join(getStateDir(), "sessions");
 }
 
-function getAgentsDir(): string {
+export function getAgentsDir(): string {
 	return join(getStateDir(), "agents");
 }
 
@@ -189,5 +189,9 @@ export function removeAgentFile(filename: string): void {
 	const filePath = join(getAgentsDir(), filename);
 	if (existsSync(filePath)) {
 		unlinkSync(filePath);
+	}
+	const lockPath = join(getAgentsDir(), `${filename}.notify.lock`);
+	if (existsSync(lockPath)) {
+		unlinkSync(lockPath);
 	}
 }

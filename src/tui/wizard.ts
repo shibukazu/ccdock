@@ -2,8 +2,6 @@ import type { RepoInfo, WizardState, WorktreeEntry } from "../types.ts";
 import { BOLD, BOX, CLEAR_SCREEN, COLORS, CURSOR_HOME, DIM, RESET, truncate } from "./ansi.ts";
 import { computeListWindow, matchesFilter } from "./list.ts";
 
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
 function renderRepoList(
 	repos: RepoInfo[],
 	selectedIndex: number,
@@ -237,24 +235,6 @@ function renderFetchChoice(repo: RepoInfo, selectedIndex: number, cols: number):
 	return lines;
 }
 
-function renderCreating(
-	repo: RepoInfo,
-	message: string,
-	cols: number,
-	animFrame: number,
-): string[] {
-	const lines: string[] = [];
-	const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
-
-	lines.push(`${BOLD}${COLORS.highlight} Creating Session: ${repo.name}${RESET}`);
-	lines.push("");
-	lines.push(`  ${COLORS.highlight}${frame}${RESET} ${message}`);
-	lines.push("");
-	lines.push(`${COLORS.muted}  Please wait...${RESET}`);
-
-	return lines;
-}
-
 export function renderWizard(
 	wizard: WizardState,
 	cols: number,
@@ -290,9 +270,6 @@ export function renderWizard(
 			break;
 		case "enter-branch":
 			content = renderBranchInput(wizard.repo, wizard.branchName, wizard.fetchBeforeCreate, cols);
-			break;
-		case "creating":
-			content = renderCreating(wizard.repo, wizard.message, cols, animFrame);
 			break;
 	}
 

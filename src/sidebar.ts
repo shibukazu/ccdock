@@ -12,7 +12,7 @@ import { disableRawMode, enableRawMode, parseKey, parseKeyWizard } from "./tui/i
 import { matchesFilter } from "./tui/list.ts";
 import { renderSidebar } from "./tui/render.ts";
 import { renderWizard } from "./tui/wizard.ts";
-import type { AgentState, HubConfig, RepoInfo, SidebarState } from "./types.ts";
+import type { AgentState, HubConfig, PendingCreation, RepoInfo, SidebarState } from "./types.ts";
 import { editorProcessPatterns, focusEditor, openEditor } from "./workspace/editor.ts";
 import {
 	cleanStaleAgents,
@@ -47,6 +47,7 @@ function createInitialState(editor: HubConfig["editor"]): SidebarState {
 		windowCloseConfirm: null,
 		quitConfirm: null,
 		deletingSessionIds: new Set(),
+		pendingCreations: [],
 		editor,
 		editorUsage: null,
 	};
@@ -267,18 +268,20 @@ async function handleWizardInput(
 					} else if (wizard.selectedIndex === 2) {
 						// Open repository root
 						const repo = wizard.repo;
-						state.wizard = {
-							step: "creating",
-							repo,
-							message: "Opening repository...",
-						};
+						const pendingId = randomUUID().slice(0, 8);
+						state.pendingCreations.push({
+							id: pendingId,
+							repoName: repo.name,
+							branch: repo.defaultBranch,
+							message: "Opening editor...",
+							status: "creating",
+							createdAt: Date.now(),
+						});
+						state.wizard = null;
 						render(state);
-						void (async () => {
-							await createSessionFromPath(repo, repo.path, repo.defaultBranch, config.editor);
-							state.wizard = null;
-							await refreshSessions(state);
-							render(state);
-						})();
+						void runCreation(state, pendingId, () =>
+							createSessionFromPath(repo, repo.path, repo.defaultBranch, config.editor),
+						);
 					}
 					break;
 				case "escape":
@@ -310,18 +313,20 @@ async function handleWizardInput(
 					const selected = filtered[wizard.selectedIndex];
 					if (selected) {
 						const repo = wizard.repo;
-						state.wizard = {
-							step: "creating",
-							repo,
-							message: "Opening worktree...",
-						};
+						const pendingId = randomUUID().slice(0, 8);
+						state.pendingCreations.push({
+							id: pendingId,
+							repoName: repo.name,
+							branch: selected.branch,
+							message: "Opening editor...",
+							status: "creating",
+							createdAt: Date.now(),
+						});
+						state.wizard = null;
 						render(state);
-						void (async () => {
-							await createSessionFromPath(repo, selected.path, selected.branch, config.editor);
-							state.wizard = null;
-							await refreshSessions(state);
-							render(state);
-						})();
+						void runCreation(state, pendingId, () =>
+							createSessionFromPath(repo, selected.path, selected.branch, config.editor),
+						);
 					}
 					break;
 				}
@@ -386,18 +391,20 @@ async function handleWizardInput(
 						const repo = wizard.repo;
 						const branch = wizard.branchName.trim();
 						const fetchBefore = wizard.fetchBeforeCreate;
-						state.wizard = {
-							step: "creating",
-							repo,
-							message: "Creating worktree...",
-						};
+						const pendingId = randomUUID().slice(0, 8);
+						state.pendingCreations.push({
+							id: pendingId,
+							repoName: repo.name,
+							branch,
+							message: fetchBefore ? "Fetching origin..." : "Creating worktree...",
+							status: "creating",
+							createdAt: Date.now(),
+						});
+						state.wizard = null;
 						render(state);
-						void (async () => {
-							await createSession(repo, branch, config.editor, fetchBefore);
-							state.wizard = null;
-							await refreshSessions(state);
-							render(state);
-						})();
+						void runCreation(state, pendingId, () =>
+							createSession(repo, branch, config.editor, fetchBefore),
+						);
 					}
 					break;
 				}
@@ -418,10 +425,40 @@ async function handleWizardInput(
 			}
 			break;
 		}
-		case "creating":
-			// Ignore all input while creating — operation is in progress
-			break;
 	}
+}
+
+async function runCreation(
+	state: SidebarState,
+	pendingId: string,
+	op: () => Promise<void>,
+): Promise<void> {
+	try {
+		await op();
+		state.pendingCreations = state.pendingCreations.filter((p) => p.id !== pendingId);
+		await refreshSessions(state);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : "Unknown error";
+		const p = state.pendingCreations.find((x) => x.id === pendingId);
+		if (p) {
+			p.status = "error";
+			p.errorMessage = msg;
+		}
+		state.activityLog.push({
+			time: new Date().toLocaleTimeString("en-US", {
+				hour12: false,
+				hour: "2-digit",
+				minute: "2-digit",
+				second: "2-digit",
+			}),
+			sessionId: pendingId,
+			sessionIndex: -1,
+			agent: "ccdock",
+			tool: "[error]",
+			toolDetail: `session creation failed: ${msg}`,
+		});
+	}
+	render(state);
 }
 
 async function createSessionFromPath(
@@ -430,24 +467,24 @@ async function createSessionFromPath(
 	branch: string,
 	editor: string,
 ): Promise<void> {
+	const sessionName = sessionNameFromBranch(branch);
+	const session = {
+		id: randomUUID().slice(0, 8),
+		sessionName: `${repo.name}:${sessionName}`,
+		worktreePath,
+		branch,
+		repoName: repo.name,
+		agents: [],
+		editorState: "open" as const,
+		createdAt: Date.now(),
+		lastActiveAt: Date.now(),
+	};
+	saveSession(session);
 	try {
-		const sessionName = sessionNameFromBranch(branch);
-		const session = {
-			id: randomUUID().slice(0, 8),
-			sessionName: `${repo.name}:${sessionName}`,
-			worktreePath,
-			branch,
-			repoName: repo.name,
-			agents: [],
-			editorState: "open" as const,
-			createdAt: Date.now(),
-			lastActiveAt: Date.now(),
-		};
-		saveSession(session);
 		await openEditor(worktreePath, editor);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : "Unknown error";
-		process.stderr.write(`\nError creating session: ${msg}\n`);
+		process.stderr.write(`\nError opening editor: ${msg}\n`);
 	}
 }
 
@@ -457,16 +494,11 @@ async function createSession(
 	editor: string,
 	fetchBeforeCreate: boolean,
 ): Promise<void> {
-	try {
-		const worktreePath = await createWorktree(repo.path, branchName, {
-			fetch: fetchBeforeCreate,
-			base: repo.defaultBranch,
-		});
-		await createSessionFromPath(repo, worktreePath, branchName, editor);
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : "Unknown error";
-		process.stderr.write(`\nError creating session: ${msg}\n`);
-	}
+	const worktreePath = await createWorktree(repo.path, branchName, {
+		fetch: fetchBeforeCreate,
+		base: repo.defaultBranch,
+	});
+	await createSessionFromPath(repo, worktreePath, branchName, editor);
 }
 
 async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Promise<void> {
@@ -595,7 +627,8 @@ export async function runSidebar(): Promise<void> {
 			state.deleteConfirm ||
 			state.windowCloseConfirm ||
 			state.quitConfirm ||
-			state.deletingSessionIds.size > 0
+			state.deletingSessionIds.size > 0 ||
+			state.pendingCreations.length > 0
 		) {
 			render(state);
 		}
@@ -712,6 +745,11 @@ export async function runSidebar(): Promise<void> {
 			}
 
 			case "delete": {
+				const errorPending = state.pendingCreations.find((p) => p.status === "error");
+				if (errorPending) {
+					state.pendingCreations = state.pendingCreations.filter((p) => p.id !== errorPending.id);
+					break;
+				}
 				const session = state.sessions[state.selectedIndex];
 				if (session && !state.deletingSessionIds.has(session.id)) {
 					state.deleteConfirm = {

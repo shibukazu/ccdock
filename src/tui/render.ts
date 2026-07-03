@@ -1,5 +1,6 @@
 import type {
 	DeleteConfirm,
+	PendingCreation,
 	SidebarState,
 	WindowCloseConfirm,
 	WorkspaceSession,
@@ -73,6 +74,42 @@ function renderWindowCloseConfirm(): string[] {
 	lines.push(`  ${COLORS.subtitle}Session and worktree will be kept${RESET}`);
 	lines.push("");
 	lines.push(`  ${COLORS.muted}Enter: close | Esc: cancel${RESET}`);
+
+	return lines;
+}
+
+function renderPendingCard(pending: PendingCreation, cols: number, animFrame: number): string[] {
+	const lines: string[] = [];
+	const width = Math.max(cols - 2, 20);
+	const isError = pending.status === "error";
+	const borderColor = isError ? COLORS.error : COLORS.waiting;
+	const titleColor = isError ? COLORS.error : COLORS.waiting;
+
+	const topBorder = `${borderColor}${BOX.topLeft}${BOX.horizontal.repeat(width - 2)}${BOX.topRight}${RESET}`;
+	lines.push(topBorder);
+
+	const icon = isError ? "✕" : SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
+	const titleText = `${titleColor}${icon} ${pending.repoName}:${pending.branch}${RESET}`;
+	const titleTruncated = truncate(titleText, width - 4);
+	const titleLine = `${borderColor}${BOX.vertical}${RESET} ${padRight(titleTruncated, width - 4)}${RESET} ${borderColor}${BOX.vertical}${RESET}`;
+	lines.push(titleLine);
+
+	if (isError) {
+		const errMsg = pending.errorMessage ?? "Unknown error";
+		const errTruncated = truncate(`${COLORS.error}${errMsg}${RESET}`, width - 4);
+		const errLine = `${borderColor}${BOX.vertical}${RESET} ${padRight(errTruncated, width - 4)}${RESET} ${borderColor}${BOX.vertical}${RESET}`;
+		lines.push(errLine);
+
+		const hint = `${COLORS.muted}(press d to dismiss)${RESET}`;
+		const hintLine = `${borderColor}${BOX.vertical}${RESET} ${padRight(hint, width - 4)}${RESET} ${borderColor}${BOX.vertical}${RESET}`;
+		lines.push(hintLine);
+	} else {
+		const msgLine = `${borderColor}${BOX.vertical}${RESET} ${padRight(pending.message, width - 4)}${RESET} ${borderColor}${BOX.vertical}${RESET}`;
+		lines.push(msgLine);
+	}
+
+	const bottomBorder = `${borderColor}${BOX.bottomLeft}${BOX.horizontal.repeat(width - 2)}${BOX.bottomRight}${RESET}`;
+	lines.push(bottomBorder);
 
 	return lines;
 }
@@ -334,10 +371,18 @@ export function renderSidebar(state: SidebarState): string {
 	const usageHeight = usageLines.length;
 	const availableForCards = state.rows - headerHeight - footerHeight - logHeight - usageHeight;
 
-	// Render session cards
+	// Render pending creation cards (overlay, not part of state.sessions)
 	let linesUsed = 0;
-	state.cardRowRanges = [];
 	const cardStartOffset = output.length; // rows before cards (header)
+	for (const pending of state.pendingCreations) {
+		const pendingLines = renderPendingCard(pending, state.cols, state.animationFrame);
+		if (linesUsed + pendingLines.length > availableForCards) break;
+		output.push(...pendingLines);
+		linesUsed += pendingLines.length;
+	}
+
+	// Render session cards
+	state.cardRowRanges = [];
 	for (let i = 0; i < state.sessions.length; i++) {
 		const session = state.sessions[i];
 		if (!session) continue;

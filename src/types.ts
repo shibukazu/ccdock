@@ -46,6 +46,16 @@ export interface WorktreeEntry {
 	branch: string;
 }
 
+export interface PendingCreation {
+	id: string;
+	repoName: string;
+	branch: string;
+	message: string;
+	status: "creating" | "error";
+	errorMessage?: string;
+	createdAt: number;
+}
+
 export interface DeleteConfirm {
 	sessionId: string;
 	worktreePath: string;
@@ -79,6 +89,7 @@ export interface SidebarState {
 	windowCloseConfirm: WindowCloseConfirm | null;
 	quitConfirm: { selectedIndex: number } | null; // 0=quit only, 1=quit+close editors
 	deletingSessionIds: Set<string>;
+	pendingCreations: PendingCreation[];
 	editor: HubConfig["editor"];
 	editorUsage: ProcUsage | null;
 }
@@ -102,11 +113,6 @@ export type WizardStep =
 			branchName: string;
 			fetchBeforeCreate: boolean;
 			repos: RepoInfo[];
-	  }
-	| {
-			step: "creating";
-			repo: RepoInfo;
-			message: string;
 	  };
 
 export type WizardState = WizardStep | null;

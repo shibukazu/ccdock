@@ -1,3 +1,5 @@
+import type { WorktreeDiff } from "./worktree/diff.ts";
+
 export type AgentType = "claude-code" | "codex";
 export type AgentStatus = "running" | "waiting" | "idle" | "stopped" | "error" | "unknown";
 
@@ -95,6 +97,12 @@ export interface SidebarState {
 	pendingCreations: PendingCreation[];
 	editor: HubConfig["editor"];
 	editorUsage: ProcUsage | null;
+	/**
+	 * Per-worktree working-tree diff snapshot, keyed by worktreePath. Populated
+	 * from a throttled cache in the sidebar loop and read at render time to show
+	 * the `~files +adds -dels` badge. Absent entries render no badge.
+	 */
+	worktreeDiffs: Map<string, WorktreeDiff | null>;
 	/**
 	 * Ghostty window id of the sidebar's own terminal, captured once at startup.
 	 * ccdock runs inside Ghostty, so this window must be excluded from every

@@ -9,10 +9,12 @@ import {
 	windowMatches,
 } from "./workspace/window.ts";
 import { disableRawMode, enableRawMode, parseKey, parseKeyWizard } from "./tui/input.ts";
+import { sortSessionsByGroup } from "./tui/grouping.ts";
 import { matchesFilter } from "./tui/list.ts";
 import { renderSidebar } from "./tui/render.ts";
 import { renderWizard } from "./tui/wizard.ts";
 import type { AgentState, HubConfig, PendingCreation, RepoInfo, SidebarState } from "./types.ts";
+import { type WorktreeDiff, getWorktreeDiff } from "./worktree/diff.ts";
 import { editorProcessPatterns, focusEditor, openEditor } from "./workspace/editor.ts";
 import {
 	closeTerminalWindow,
@@ -60,8 +62,44 @@ function createInitialState(editor: HubConfig["editor"]): SidebarState {
 		pendingCreations: [],
 		editor,
 		editorUsage: null,
+		worktreeDiffs: new Map(),
 		sidebarWindowId: null,
 	};
+}
+
+// Working-tree diff cache. Refreshing git diff on every 2s tick is wasteful, so
+// results are memoized per worktree and only recomputed when older than this.
+const DIFF_TTL_MS = 8000;
+const diffCache = new Map<string, { at: number; diff: WorktreeDiff | null }>();
+
+// Refresh diffs for sessions whose editor or terminal is not closed, honoring
+// the per-worktree TTL. Fetches run concurrently. The resulting snapshot is
+// stored on state.worktreeDiffs for the renderer to read; the cache itself is
+// module-level so it survives the 2s disk-rebuild of the sessions array.
+async function refreshWorktreeDiffs(state: SidebarState): Promise<void> {
+	const now = Date.now();
+	const targets = state.sessions.filter(
+		(s) => s.editorState !== "closed" || s.terminalState !== "closed",
+	);
+
+	const stale = targets.filter((s) => {
+		const cached = diffCache.get(s.worktreePath);
+		return !cached || now - cached.at >= DIFF_TTL_MS;
+	});
+	await Promise.all(
+		stale.map(async (s) => {
+			const diff = await getWorktreeDiff(s.worktreePath);
+			diffCache.set(s.worktreePath, { at: Date.now(), diff });
+		}),
+	);
+
+	// Build the render snapshot from the cache for the currently visible sessions.
+	const snapshot = new Map<string, WorktreeDiff | null>();
+	for (const s of targets) {
+		const cached = diffCache.get(s.worktreePath);
+		if (cached) snapshot.set(s.worktreePath, cached.diff);
+	}
+	state.worktreeDiffs = snapshot;
 }
 
 async function refreshSessions(state: SidebarState): Promise<void> {
@@ -175,12 +213,27 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 		}
 	}
 
-	state.sessions = sessions;
+	// Group sessions (Active → Ready → Closed) so the display order matches the
+	// array order — keeping j/k, click, and delete indexing correct. The sort is
+	// stable, so within a group the load order (lastActiveAt desc) is preserved.
+	// Remember the selected session's id so grouping doesn't move the cursor to a
+	// different card.
+	const selectedId = state.sessions[state.selectedIndex]?.id;
+	const sortedSessions = sortSessionsByGroup(sessions);
+	state.sessions = sortedSessions;
 
+	// Re-anchor the selection on the same session after reordering.
+	if (selectedId) {
+		const newIndex = sortedSessions.findIndex((s) => s.id === selectedId);
+		if (newIndex >= 0) state.selectedIndex = newIndex;
+	}
 	// Keep selectedIndex in bounds
 	if (state.selectedIndex >= state.sessions.length) {
 		state.selectedIndex = Math.max(0, state.sessions.length - 1);
 	}
+
+	// Refresh working-tree diffs (throttled per worktree) for the render snapshot.
+	await refreshWorktreeDiffs(state);
 
 	// Update activity log from agents
 	for (const agent of agentStates) {
@@ -191,7 +244,7 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 				minute: "2-digit",
 				second: "2-digit",
 			});
-			const sessionIdx = sessions.findIndex(
+			const sessionIdx = sortedSessions.findIndex(
 				(s) =>
 					agent.sessionId === s.id ||
 					agent.cwd === s.worktreePath ||

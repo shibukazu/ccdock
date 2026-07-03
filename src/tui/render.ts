@@ -5,6 +5,8 @@ import type {
 	WindowCloseConfirm,
 	WorkspaceSession,
 } from "../types.ts";
+import type { WorktreeDiff } from "../worktree/diff.ts";
+import { GROUP_LABELS, type SessionGroup, groupOfSession } from "./grouping.ts";
 
 const SPINNER_FRAMES = [
 	"\u280b",
@@ -26,10 +28,13 @@ import {
 	CURSOR_HOME,
 	DIM,
 	RESET,
+	agentTypeIcon,
 	clearLine,
+	formatElapsed,
 	formatMem,
 	moveCursor,
 	shortenHome,
+	statusBadge,
 	statusColor,
 	statusIcon,
 	truncate,
@@ -40,6 +45,31 @@ function padRight(str: string, len: number): string {
 	const visible = visibleLength(str);
 	if (visible >= len) return str;
 	return str + " ".repeat(len - visible);
+}
+
+// Re-assert a background color after every RESET in the content so a selection
+// highlight spans the whole field even when inner segments reset their styling.
+function applyBg(content: string, bg: string): string {
+	return `${bg}${content.split(RESET).join(`${RESET}${bg}`)}${RESET}`;
+}
+
+// Group heading row: `── Active (2) ──────────` in a muted rule style.
+function groupHeading(group: SessionGroup, count: number, width: number): string {
+	const label = `${GROUP_LABELS[group]} (${count})`;
+	const prefix = `── ${label} `;
+	const fill = Math.max(0, width - visibleLength(prefix));
+	return `${COLORS.muted}${prefix}${"─".repeat(fill)}${RESET}`;
+}
+
+// diff badge line body: `~files +additions -deletions`. Returns "" when there
+// are no changes at all so callers can skip the row.
+function diffBadgeText(diff: WorktreeDiff): string {
+	if (diff.files === 0 && diff.additions === 0 && diff.deletions === 0) return "";
+	const parts: string[] = [];
+	if (diff.files > 0) parts.push(`${COLORS.diffFile}~${diff.files}${RESET}`);
+	if (diff.additions > 0) parts.push(`${COLORS.diffAdd}+${diff.additions}${RESET}`);
+	if (diff.deletions > 0) parts.push(`${COLORS.diffDel}-${diff.deletions}${RESET}`);
+	return parts.join(" ");
 }
 
 function renderDeleteConfirm(deleteConfirm: DeleteConfirm): string[] {
@@ -125,6 +155,7 @@ function renderCard(
 	windowCloseConfirm: WindowCloseConfirm | null,
 	sessionIndex: number,
 	isDeleting: boolean,
+	diff: WorktreeDiff | null,
 ): string[] {
 	const lines: string[] = [];
 	const width = Math.max(cols - 2, 20);
@@ -179,13 +210,28 @@ function renderCard(
 	const topBorder = `${dimAll}${borderColor}${BOX.topLeft}${BOX.horizontal.repeat(width - 2)}${BOX.topRight}${RESET}`;
 	lines.push(topBorder);
 
-	// Title line: #N + dot (if open) + icon + repo:branch
+	// Title line: #N + dot (if open) + icon + repo:branch, with an elapsed-time
+	// stamp (and a \u25b8 chevron when selected) right-aligned at the far edge.
 	const icon = "\uf418";
 	const sessionNum = `${COLORS.muted}#${sessionIndex + 1}${RESET} `;
 	const titleText = `${titleColor}${icon} ${session.repoName}:${session.branch}${RESET}`;
-	const title = `${sessionNum}${openDot}${terminalDot}${titleText}`;
-	const titleTruncated = truncate(title, width - 4);
-	const titleLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(titleTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+	const titleLeft = `${sessionNum}${openDot}${terminalDot}${titleText}`;
+
+	// Right stamp: most-recent agent update, else the session's own activity time.
+	const latestAgentTs = session.agents.reduce((max, a) => Math.max(max, a.updatedAt), 0);
+	const stampBase = latestAgentTs > 0 ? latestAgentTs : session.lastActiveAt;
+	const elapsed = formatElapsed(Date.now() - stampBase);
+	const chevron = isSelected ? " \u203a" : "";
+	const rightStamp = `${COLORS.muted}${elapsed}${chevron}${RESET}`;
+	const rightWidth = visibleLength(rightStamp);
+
+	// Left column gets whatever the stamp does not use (min 1, leave a gap).
+	const leftWidth = Math.max(1, width - 4 - rightWidth - 1);
+	const leftTruncated = truncate(titleLeft, leftWidth);
+	// Pad the left so the stamp sits flush right within the width-4 field.
+	const titleInner = `${padRight(leftTruncated, width - 4 - rightWidth)}${rightStamp}`;
+	const titleField = isSelected ? applyBg(titleInner, COLORS.bgSelected) : titleInner;
+	const titleLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${titleField}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 	lines.push(titleLine);
 
 	if (!compact) {
@@ -207,10 +253,11 @@ function renderCard(
 			lines.push(agentLine);
 		} else {
 			for (const agent of session.agents) {
-				const sIcon = statusIcon(agent.status, animFrame);
+				// Agent row: [ STATUS ] pill + agent-type glyph + type name.
+				const badge = statusBadge(agent.status);
 				const sColor = statusColor(agent.status);
-				const statusText = `${sColor}${sIcon} ${agent.status}${RESET}`;
-				const agentInfo = `${statusText} ${detailColor}${agent.agentType}${RESET}`;
+				const typeIcon = `${sColor}${agentTypeIcon(agent.agentType)}${RESET}`;
+				const agentInfo = `${badge} ${typeIcon} ${detailColor}${agent.agentType}${RESET}`;
 				const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(agentInfo, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 				lines.push(agentLine);
 
@@ -223,6 +270,16 @@ function renderCard(
 					const detailLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(detailTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 					lines.push(detailLine);
 				}
+			}
+		}
+
+		// Working-tree diff badge (`~files +adds -dels`); omitted when unchanged.
+		if (diff) {
+			const badgeText = diffBadgeText(diff);
+			if (badgeText) {
+				const diffTruncated = truncate(badgeText, width - 4);
+				const diffLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(diffTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+				lines.push(diffLine);
 			}
 		}
 	} else {
@@ -238,7 +295,12 @@ function renderCard(
 		} else {
 			agentSummary = `${DIM}no agents${RESET}`;
 		}
-		const compactLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(agentSummary, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+		if (diff) {
+			const badgeText = diffBadgeText(diff);
+			if (badgeText) agentSummary = `${agentSummary}  ${badgeText}`;
+		}
+		const compactSummary = truncate(agentSummary, width - 4);
+		const compactLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(compactSummary, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 		lines.push(compactLine);
 	}
 
@@ -399,12 +461,29 @@ export function renderSidebar(state: SidebarState): string {
 		linesUsed += pendingLines.length;
 	}
 
-	// Render session cards
+	// Render session cards, grouped by state (Active → Ready → Closed). The
+	// sessions array is already sorted into group order upstream, so a group
+	// heading is emitted whenever the group changes. Headings sit outside
+	// cardRowRanges (like pending cards) so they are never click targets.
 	state.cardRowRanges = [];
+	const width = Math.max(state.cols - 2, 20);
+	// Per-group counts (whole array, independent of what fits on screen).
+	const groupCounts = new Map<string, number>();
+	for (const s of state.sessions) {
+		const g = groupOfSession(s);
+		groupCounts.set(g, (groupCounts.get(g) ?? 0) + 1);
+	}
+	let currentGroup: string | null = null;
 	for (let i = 0; i < state.sessions.length; i++) {
 		const session = state.sessions[i];
 		if (!session) continue;
+
+		const group = groupOfSession(session);
+		const headingLine =
+			group !== currentGroup ? groupHeading(group, groupCounts.get(group) ?? 0, width) : null;
+
 		const isSelected = i === state.selectedIndex;
+		const diff = state.worktreeDiffs?.get(session.worktreePath) ?? null;
 		const cardLines = renderCard(
 			session,
 			isSelected,
@@ -415,9 +494,16 @@ export function renderSidebar(state: SidebarState): string {
 			state.windowCloseConfirm,
 			i,
 			state.deletingSessionIds.has(session.id),
+			diff,
 		);
 
-		if (linesUsed + cardLines.length > availableForCards) break;
+		const extra = headingLine ? 1 : 0;
+		if (linesUsed + extra + cardLines.length > availableForCards) break;
+		if (headingLine) {
+			output.push(headingLine);
+			linesUsed += 1;
+			currentGroup = group;
+		}
 		const startRow = cardStartOffset + linesUsed + 1; // 1-based row
 		state.cardRowRanges.push({
 			sessionIndex: i,

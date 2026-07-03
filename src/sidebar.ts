@@ -44,6 +44,7 @@ function createInitialState(editor: HubConfig["editor"]): SidebarState {
 		activityLog: [],
 		wizard: null,
 		deleteConfirm: null,
+		windowCloseConfirm: null,
 		quitConfirm: null,
 		deletingSessionIds: new Set(),
 		editor,
@@ -529,6 +530,31 @@ async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Prom
 	}
 }
 
+async function handleWindowCloseConfirmInput(state: SidebarState, data: Buffer): Promise<void> {
+	const confirm = state.windowCloseConfirm;
+	if (!confirm) return;
+
+	const key = parseKeyWizard(data);
+
+	switch (key.type) {
+		case "enter": {
+			const { worktreePath } = confirm;
+			state.windowCloseConfirm = null;
+			render(state);
+
+			void (async () => {
+				await closeEditorWindow(worktreePath);
+				await refreshSessions(state);
+				render(state);
+			})();
+			break;
+		}
+		case "escape":
+			state.windowCloseConfirm = null;
+			break;
+	}
+}
+
 function getManagedWindows(sessions: SidebarState["sessions"]): { worktreePath: string }[] {
 	return sessions
 		.filter((s) => s.editorState !== "closed")
@@ -567,6 +593,7 @@ export async function runSidebar(): Promise<void> {
 			hasAnimated ||
 			state.wizard ||
 			state.deleteConfirm ||
+			state.windowCloseConfirm ||
 			state.quitConfirm ||
 			state.deletingSessionIds.size > 0
 		) {
@@ -624,6 +651,13 @@ export async function runSidebar(): Promise<void> {
 		// Delete confirmation mode
 		if (state.deleteConfirm) {
 			await handleDeleteConfirmInput(state, data);
+			render(state);
+			return;
+		}
+
+		// Window close confirmation mode
+		if (state.windowCloseConfirm) {
+			await handleWindowCloseConfirmInput(state, data);
 			render(state);
 			return;
 		}
@@ -703,8 +737,12 @@ export async function runSidebar(): Promise<void> {
 
 			case "window_close": {
 				const session = state.sessions[state.selectedIndex];
-				if (session && !state.deletingSessionIds.has(session.id)) {
-					await closeEditorWindow(session.worktreePath);
+				if (
+					session &&
+					!state.deletingSessionIds.has(session.id) &&
+					session.editorState !== "closed"
+				) {
+					state.windowCloseConfirm = { sessionId: session.id, worktreePath: session.worktreePath };
 				}
 				break;
 			}

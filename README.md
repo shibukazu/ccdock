@@ -167,6 +167,7 @@ ccdock help     # show help
 | `Tab`        | Focus editor window (same as Enter)     |
 | `n`          | Create new session (interactive wizard) |
 | `d`          | Delete session                          |
+| `w`          | Close editor window (with confirmation) |
 | `r`          | Realign all VS Code windows             |
 | `c`          | Toggle compact mode                     |
 | `l`          | Toggle activity log                     |

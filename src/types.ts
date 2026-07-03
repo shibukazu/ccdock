@@ -52,6 +52,11 @@ export interface DeleteConfirm {
 	selectedIndex: number; // 0 = session only, 1 = session + worktree
 }
 
+export interface WindowCloseConfirm {
+	sessionId: string;
+	worktreePath: string;
+}
+
 export interface SidebarState {
 	sessions: WorkspaceSession[];
 	selectedIndex: number;
@@ -71,6 +76,7 @@ export interface SidebarState {
 	}>;
 	wizard: WizardState;
 	deleteConfirm: DeleteConfirm | null;
+	windowCloseConfirm: WindowCloseConfirm | null;
 	quitConfirm: { selectedIndex: number } | null; // 0=quit only, 1=quit+close editors
 	deletingSessionIds: Set<string>;
 	editor: HubConfig["editor"];

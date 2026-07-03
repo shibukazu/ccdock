@@ -1,4 +1,9 @@
-import type { DeleteConfirm, SidebarState, WorkspaceSession } from "../types.ts";
+import type {
+	DeleteConfirm,
+	SidebarState,
+	WindowCloseConfirm,
+	WorkspaceSession,
+} from "../types.ts";
 
 const SPINNER_FRAMES = [
 	"\u280b",
@@ -61,6 +66,17 @@ function renderDeleteConfirm(deleteConfirm: DeleteConfirm): string[] {
 	return lines;
 }
 
+function renderWindowCloseConfirm(): string[] {
+	const lines: string[] = [];
+
+	lines.push(`  ${BOLD}${COLORS.waiting} Close editor window?${RESET}`);
+	lines.push(`  ${COLORS.subtitle}Session and worktree will be kept${RESET}`);
+	lines.push("");
+	lines.push(`  ${COLORS.muted}Enter: close | Esc: cancel${RESET}`);
+
+	return lines;
+}
+
 function renderCard(
 	session: WorkspaceSession,
 	isSelected: boolean,
@@ -68,6 +84,7 @@ function renderCard(
 	animFrame: number,
 	compact: boolean,
 	deleteConfirm: DeleteConfirm | null,
+	windowCloseConfirm: WindowCloseConfirm | null,
 	sessionIndex: number,
 	isDeleting: boolean,
 ): string[] {
@@ -175,6 +192,15 @@ function renderCard(
 	// Delete confirmation inline
 	if (isSelected && deleteConfirm && deleteConfirm.sessionId === session.id) {
 		const confirmLines = renderDeleteConfirm(deleteConfirm);
+		for (const cl of confirmLines) {
+			const confirmLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(cl, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+			lines.push(confirmLine);
+		}
+	}
+
+	// Window close confirmation inline
+	if (isSelected && windowCloseConfirm && windowCloseConfirm.sessionId === session.id) {
+		const confirmLines = renderWindowCloseConfirm();
 		for (const cl of confirmLines) {
 			const confirmLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(cl, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 			lines.push(confirmLine);
@@ -323,6 +349,7 @@ export function renderSidebar(state: SidebarState): string {
 			state.animationFrame,
 			state.compactMode,
 			state.deleteConfirm,
+			state.windowCloseConfirm,
 			i,
 			state.deletingSessionIds.has(session.id),
 		);

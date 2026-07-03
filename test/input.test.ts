@@ -89,4 +89,13 @@ describe("parseKeyWizard", () => {
 	test("non-ASCII runes yield unknown (IME unconfirmed preview is out of scope)", () => {
 		expect(parseKeyWizard(Buffer.from("\u3042"))).toEqual({ type: "unknown" });
 	});
+
+	test("scroll wheel becomes up/down", () => {
+		expect(parseKeyWizard(Buffer.from("\x1b[<64;10;5M"))).toEqual({ type: "up" });
+		expect(parseKeyWizard(Buffer.from("\x1b[<65;10;5M"))).toEqual({ type: "down" });
+	});
+
+	test("other mouse events yield unknown, not stray char input", () => {
+		expect(parseKeyWizard(Buffer.from("\x1b[<0;12;5M"))).toEqual({ type: "unknown" });
+	});
 });

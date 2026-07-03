@@ -101,6 +101,17 @@ export function parseKeyWizard(data: Buffer): WizardKeyAction {
 	const raw = data.toString();
 	const s = normalizeFullwidth(raw);
 
+	// SGR mouse: \x1b[<button;col;rowM (press) or \x1b[<button;col;rowm (release)
+	const sgrMatch = s.match(/^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/);
+	if (sgrMatch) {
+		const button = Number.parseInt(sgrMatch[1]!, 10);
+		const isPress = sgrMatch[4] === "M";
+		// Scroll up/down
+		if (isPress && button === 64) return { type: "up" };
+		if (isPress && button === 65) return { type: "down" };
+		return { type: "unknown" };
+	}
+
 	// Escape sequences for arrow keys
 	if (s === "\x1b[A") return { type: "up" };
 	if (s === "\x1b[B") return { type: "down" };

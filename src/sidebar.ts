@@ -175,7 +175,7 @@ let lastRendered = "";
 
 function render(state: SidebarState): void {
 	const output = state.wizard
-		? renderWizard(state.wizard, state.cols, state.animationFrame)
+		? renderWizard(state.wizard, state.cols, state.rows, state.animationFrame)
 		: renderSidebar(state);
 	if (output === lastRendered) return;
 	lastRendered = output;
@@ -235,6 +235,13 @@ async function handleWizardInput(
 					break;
 				case "down":
 					wizard.selectedIndex = Math.min(2, wizard.selectedIndex + 1);
+					break;
+				case "char":
+					if (key.char === "j") {
+						wizard.selectedIndex = Math.min(2, wizard.selectedIndex + 1);
+					} else if (key.char === "k") {
+						wizard.selectedIndex = Math.max(0, wizard.selectedIndex - 1);
+					}
 					break;
 				case "enter":
 					if (wizard.selectedIndex === 0) {
@@ -343,6 +350,13 @@ async function handleWizardInput(
 					break;
 				case "down":
 					wizard.selectedIndex = Math.min(1, wizard.selectedIndex + 1);
+					break;
+				case "char":
+					if (key.char === "j") {
+						wizard.selectedIndex = Math.min(1, wizard.selectedIndex + 1);
+					} else if (key.char === "k") {
+						wizard.selectedIndex = Math.max(0, wizard.selectedIndex - 1);
+					}
 					break;
 				case "enter":
 					state.wizard = {

@@ -34,6 +34,7 @@ import {
 	moveCursor,
 	shortenHome,
 	statusBadge,
+	agentTypeIcon,
 	statusColor,
 	statusIcon,
 	truncate,
@@ -248,9 +249,9 @@ function renderCard(
 			lines.push(agentLine);
 		} else {
 			for (const agent of session.agents) {
-				// Agent row: [ STATUS ] pill + type name.
+				// Agent row: [ STATUS ] pill + agent logo icon.
 				const badge = statusBadge(agent.status);
-				const agentInfo = `${badge} ${detailColor}${agent.agentType}${RESET}`;
+				const agentInfo = `${badge} ${agentTypeIcon(agent.agentType)}`;
 				const agentLine = boxLine(agentInfo, width, borderColor, dimAll);
 				lines.push(agentLine);
 

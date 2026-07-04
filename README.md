@@ -24,7 +24,7 @@ ccdock sits in a narrow terminal sidebar and takes care of the rest: auto-positi
 
 ## Features
 
-- **VS Code orchestration** — Auto-open, position, and switch VS Code (or Cursor) windows next to the sidebar. Click a session, and the right editor snaps into focus.
+- **VS Code orchestration** — Auto-open, position, and switch VS Code (or Cursor) windows next to the sidebar. Click a session and confirm, and the right editor snaps into focus (the confirmation guards against accidental clicks).
 - **Real-time agent monitoring** — See exactly what each Claude Code agent is doing: which tool it's calling, what file it's reading, what command it's running.
 - **Git worktree management** — Create, switch, and delete worktrees via [git-wt](https://github.com/k1LoW/git-wt) integration. Each worktree gets its own session.
 - **Activity log** — Live feed of tool invocations with session numbers (#N) across all active agents.

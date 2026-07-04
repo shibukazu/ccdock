@@ -57,6 +57,7 @@ function createInitialState(editor: HubConfig["editor"]): SidebarState {
 		wizard: null,
 		deleteConfirm: null,
 		windowCloseConfirm: null,
+		windowOpenConfirm: null,
 		quitConfirm: null,
 		deletingSessionIds: new Set(),
 		pendingCreations: [],
@@ -686,6 +687,39 @@ async function handleWindowCloseConfirmInput(state: SidebarState, data: Buffer):
 	}
 }
 
+async function handleWindowOpenConfirmInput(state: SidebarState, data: Buffer): Promise<void> {
+	const confirm = state.windowOpenConfirm;
+	if (!confirm) return;
+
+	const key = parseKeyWizard(data);
+
+	switch (key.type) {
+		case "enter": {
+			const { sessionId, worktreePath } = confirm;
+			state.windowOpenConfirm = null;
+			render(state);
+
+			void (async () => {
+				const focused = await focusEditor(worktreePath, state.editor, state.sidebarWindowId);
+				if (!focused) {
+					const session = state.sessions.find((s) => s.id === sessionId);
+					if (session) {
+						session.editorState = "launching";
+						render(state);
+					}
+					await openEditor(worktreePath, state.editor, state.sidebarWindowId);
+					if (session) session.editorState = "open";
+				}
+				render(state);
+			})();
+			break;
+		}
+		case "escape":
+			state.windowOpenConfirm = null;
+			break;
+	}
+}
+
 function getManagedWindows(sessions: SidebarState["sessions"]): { worktreePath: string }[] {
 	return sessions
 		.filter((s) => s.editorState !== "closed")
@@ -741,6 +775,7 @@ export async function runSidebar(): Promise<void> {
 			state.wizard ||
 			state.deleteConfirm ||
 			state.windowCloseConfirm ||
+			state.windowOpenConfirm ||
 			state.quitConfirm ||
 			state.deletingSessionIds.size > 0 ||
 			state.pendingCreations.length > 0
@@ -809,6 +844,13 @@ export async function runSidebar(): Promise<void> {
 		// Window close confirmation mode
 		if (state.windowCloseConfirm) {
 			await handleWindowCloseConfirmInput(state, data);
+			render(state);
+			return;
+		}
+
+		// Window open confirmation mode
+		if (state.windowOpenConfirm) {
+			await handleWindowOpenConfirmInput(state, data);
 			render(state);
 			return;
 		}
@@ -959,17 +1001,12 @@ export async function runSidebar(): Promise<void> {
 					state.selectedIndex = clicked.sessionIndex;
 					const session = state.sessions[clicked.sessionIndex];
 					if (session && !state.deletingSessionIds.has(session.id)) {
-						const focused = await focusEditor(
-							session.worktreePath,
-							config.editor,
-							state.sidebarWindowId,
-						);
-						if (!focused) {
-							session.editorState = "launching";
-							render(state);
-							await openEditor(session.worktreePath, config.editor, state.sidebarWindowId);
-							session.editorState = "open";
-						}
+						// Clicks are easy to fire by accident, so confirm before
+						// focusing/opening the editor window (Enter stays direct).
+						state.windowOpenConfirm = {
+							sessionId: session.id,
+							worktreePath: session.worktreePath,
+						};
 					}
 				}
 				break;

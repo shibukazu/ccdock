@@ -72,6 +72,12 @@ export interface WindowCloseConfirm {
 	target: "editor" | "terminal";
 }
 
+/** Confirmation before a mouse click focuses/opens an editor window (guards accidental clicks). */
+export interface WindowOpenConfirm {
+	sessionId: string;
+	worktreePath: string;
+}
+
 export interface SidebarState {
 	sessions: WorkspaceSession[];
 	selectedIndex: number;
@@ -92,6 +98,7 @@ export interface SidebarState {
 	wizard: WizardState;
 	deleteConfirm: DeleteConfirm | null;
 	windowCloseConfirm: WindowCloseConfirm | null;
+	windowOpenConfirm: WindowOpenConfirm | null;
 	quitConfirm: { selectedIndex: number } | null; // 0=quit only, 1=quit+close editors
 	deletingSessionIds: Set<string>;
 	pendingCreations: PendingCreation[];

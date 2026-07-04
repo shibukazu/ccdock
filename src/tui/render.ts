@@ -3,6 +3,7 @@ import type {
 	PendingCreation,
 	SidebarState,
 	WindowCloseConfirm,
+	WindowOpenConfirm,
 	WorkspaceSession,
 } from "../types.ts";
 import type { WorktreeDiff } from "../worktree/diff.ts";
@@ -109,6 +110,16 @@ function renderWindowCloseConfirm(target: WindowCloseConfirm["target"]): string[
 	return lines;
 }
 
+function renderWindowOpenConfirm(): string[] {
+	const lines: string[] = [];
+
+	lines.push(`  ${BOLD}${COLORS.waiting} Open editor window?${RESET}`);
+	lines.push("");
+	lines.push(`  ${COLORS.muted}Enter: open | Esc: cancel${RESET}`);
+
+	return lines;
+}
+
 /** One card body row: content padded to the card width between vertical borders. */
 function boxLine(content: string, width: number, borderColor: string, dimAll = ""): string {
 	return `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(content, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
@@ -158,6 +169,7 @@ function renderCard(
 	compact: boolean,
 	deleteConfirm: DeleteConfirm | null,
 	windowCloseConfirm: WindowCloseConfirm | null,
+	windowOpenConfirm: WindowOpenConfirm | null,
 	sessionIndex: number,
 	isDeleting: boolean,
 	diff: WorktreeDiff | null,
@@ -324,6 +336,13 @@ function renderCard(
 		for (const cl of confirmLines) {
 			const confirmLine = boxLine(cl, width, borderColor, dimAll);
 			lines.push(confirmLine);
+		}
+	}
+
+	// Window open confirmation inline (accidental-click guard)
+	if (isSelected && windowOpenConfirm && windowOpenConfirm.sessionId === session.id) {
+		for (const cl of renderWindowOpenConfirm()) {
+			lines.push(boxLine(cl, width, borderColor, dimAll));
 		}
 	}
 
@@ -497,6 +516,7 @@ export function renderSidebar(state: SidebarState): string {
 			state.compactMode,
 			state.deleteConfirm,
 			state.windowCloseConfirm,
+			state.windowOpenConfirm,
 			i,
 			state.deletingSessionIds.has(session.id),
 			diff,

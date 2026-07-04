@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentState } from "../src/types.ts";
@@ -20,7 +28,7 @@ async function runHook(event: string, payload: Record<string, unknown>): Promise
 		stdin: "pipe",
 		stdout: "pipe",
 		stderr: "pipe",
-		env: { ...process.env, XDG_STATE_HOME: stateRoot },
+		env: { ...process.env, XDG_STATE_HOME: stateRoot, CCDOCK_SILENT: "1" },
 	});
 	proc.stdin.write(JSON.stringify(payload));
 	await proc.stdin.end();
@@ -29,6 +37,24 @@ async function runHook(event: string, payload: Record<string, unknown>): Promise
 
 function agentsDir(): string {
 	return join(stateRoot, "ccdock", "agents");
+}
+
+function registerSession(id: string, worktreePath: string): void {
+	const dir = join(stateRoot, "ccdock", "sessions");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(
+		join(dir, `${id}.json`),
+		JSON.stringify({
+			id,
+			sessionName: id,
+			worktreePath,
+			branch: "main",
+			repoName: "repo",
+			editorState: "closed",
+			createdAt: 1,
+			lastActiveAt: 1,
+		}),
+	);
 }
 
 function readOnlyAgent(): AgentState {
@@ -145,5 +171,27 @@ describe("ccdock hook", () => {
 		if (existsSync(agentsDir())) {
 			expect(readdirSync(agentsDir()).length).toBe(0);
 		}
+	});
+
+	test("subagent event from an unmapped cwd updates the same file and keeps the mapped cwd", async () => {
+		registerSession("s1", "/tmp/workspace/repo");
+		await runHook("PreToolUse", {
+			session_id: "sess-abc",
+			cwd: "/tmp/workspace/repo",
+			tool_name: "Bash",
+			tool_input: { command: "ls" },
+		});
+		// Same session, but the event originates from a scratchpad-style cwd
+		// that maps to no known session.
+		await runHook("PreToolUse", {
+			session_id: "sess-abc",
+			cwd: "/tmp/some-scratchpad/dir",
+			tool_name: "Write",
+			tool_input: { file_path: "/tmp/some-scratchpad/dir/x" },
+		});
+		const state = readOnlyAgent();
+		expect(state.cwd).toBe("/tmp/workspace/repo");
+		expect(state.sessionId).toBe("s1");
+		expect(state.toolName).toBe("Write");
 	});
 });

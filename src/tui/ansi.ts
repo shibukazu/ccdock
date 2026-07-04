@@ -104,20 +104,6 @@ export function statusBadge(status: string): string {
 	return `${bg}${BLACK_FG}${BOLD} ${label} ${RESET}`;
 }
 
-// Logo-style agent icons in place of the type name. The official Claude brand
-// glyph is not in Nerd Fonts yet (https://github.com/ryanoasis/nerd-fonts/issues/2001);
-// swap these for the official codepoints once a release ships them. Until then:
-// Claude's starburst in brand orange, Codex as a filled hexagon — bold and the
-// visually largest plain-Unicode shapes available.
-export function agentTypeIcon(type: string): string {
-	switch (type) {
-		case "claude-code":
-			return `${BOLD}${fg256(173)}✺${RESET}`;
-		default:
-			return `${BOLD}${fg256(252)}⬢${RESET}`;
-	}
-}
-
 function statusBadgeLabel(status: string): string {
 	switch (status) {
 		case "running":

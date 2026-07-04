@@ -190,19 +190,20 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 		return;
 	}
 
-	// Subagents (Task tool) inherit a fresh session_id but are already represented
-	// by the parent's Task tool entry — writing a separate agent file would
-	// duplicate them as independent agents on the sidebar. Detect via
-	// parent_tool_use_id, which Claude Code sets only on subagent invocations.
+	// Older Claude Code versions fired subagent (Task tool) events with a fresh
+	// session_id plus parent_tool_use_id, which would create duplicate agent
+	// rows — skip those. Current versions (observed on 2.1.x) share the
+	// parent's session_id and omit the field, so subagent events fall through
+	// and simply count as activity of the parent session below.
 	if (payload.parent_tool_use_id) {
 		return;
 	}
 
-	// By extension, SubagentStop is never handled either — it isn't in
-	// STATUS_MAP or the documented hooks setup, so subagent completion never
-	// reaches here and never triggers a notification.
-
-	const filename = `${sanitize(cwd)}-${claudeSessionId}.json`;
+	// One state file per Claude session: subagent events (same session_id, but
+	// possibly a different cwd such as a scratchpad or isolated worktree) update
+	// the same file instead of spawning per-cwd ghost entries. Files from the
+	// older `<cwd>-<session_id>` naming are migrated away by cleanStaleAgents.
+	const filename = `${sanitize(claudeSessionId)}.json`;
 
 	const mappedStatus = STATUS_MAP[eventName];
 
@@ -229,7 +230,15 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 	}
 
 	const status = mappedStatus ?? "unknown";
-	const sessionId = findSessionByPath(cwd);
+	// Subagents can run in a cwd outside any session (scratchpad, isolated
+	// worktree). Keep the previously mapped cwd in that case so the sidebar
+	// keeps attributing the activity to the right session.
+	let sessionId = findSessionByPath(cwd);
+	let agentCwd = cwd;
+	if (!sessionId && prevState) {
+		agentCwd = prevState.cwd;
+		sessionId = prevState.sessionId || findSessionByPath(agentCwd);
+	}
 	const rawToolName = (payload.tool_name as string) ?? "";
 	const toolInput = (payload.tool_input as Record<string, unknown>) ?? {};
 	const rawToolDetail = extractToolDetail(agentType as AgentType, rawToolName, toolInput);
@@ -252,7 +261,7 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 		prompt: buildPrompt(eventName, payload),
 		toolName,
 		toolDetail,
-		cwd,
+		cwd: agentCwd,
 		updatedAt: now,
 		pid: process.ppid,
 		lastNotifiedAt,

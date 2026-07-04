@@ -91,6 +91,16 @@ describe("cleanStaleAgents", () => {
 		expect(existsSync(p)).toBe(true);
 	});
 
+	test("removes legacy per-cwd file once the session-keyed twin exists", async () => {
+		const { cleanStaleAgents } = await import(`../src/workspace/state.ts?t=${Date.now()}`);
+		writeSession(buildSession());
+		const legacy = writeAgent("_tmp_repo-sess-uuid-1.json", buildAgent({ status: "stopped" }));
+		const current = writeAgent("sess-uuid-1.json", buildAgent({ status: "running" }));
+		cleanStaleAgents();
+		expect(existsSync(legacy)).toBe(false);
+		expect(existsSync(current)).toBe(true);
+	});
+
 	test("removes transient (running) agent older than 30 minutes", async () => {
 		const { cleanStaleAgents } = await import(`../src/workspace/state.ts?t=${Date.now()}`);
 		writeSession(buildSession());

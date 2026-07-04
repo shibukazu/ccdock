@@ -109,6 +109,11 @@ export interface SidebarState {
 	 */
 	worktreeDiffs: Map<string, WorktreeDiff | null>;
 	/**
+	 * Warning message when a registered ccdock hook command is broken (e.g. a
+	 * dangling symlink), computed once at startup. null when hooks are healthy.
+	 */
+	hookWarning: string | null;
+	/**
 	 * Ghostty window id of the sidebar's own terminal, captured once at startup.
 	 * ccdock runs inside Ghostty, so this window must be excluded from every
 	 * list/close/reposition/focus operation. null when ccdock is not running

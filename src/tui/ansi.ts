@@ -38,6 +38,11 @@ export const COLORS = {
 	highlight: fg256(117), // light blue
 	accent: fg256(213), // pink/magenta
 
+	// diff badge accents
+	diffAdd: fg256(82), // green — additions
+	diffDel: fg256(196), // red — deletions
+	diffFile: fg256(220), // yellow — changed files
+
 	bgSelected: bg256(236), // dark highlight
 	bgHeader: bg256(235), // header background
 
@@ -69,23 +74,95 @@ export function statusColor(status: string): string {
 	}
 }
 
-// Status icons
+// Status icons — differentiated per state (orca-style).
+//   running=● waiting=◐(pulses) idle=○ stopped=✓ error=✗
 export function statusIcon(status: string, frame: number): string {
 	const pulse = frame % 4 < 2;
 	switch (status) {
 		case "running":
-			return "\u25cf"; // ●
+			return "●"; // ●
 		case "waiting":
-			return pulse ? "\u25cf" : "\u25cb";
+			return pulse ? "◐" : "○"; // ◐ / ○ — pulsing
 		case "idle":
-			return "\u25cb"; // ○ — not started / no activity
+			return "○"; // ○ — not started / no activity
 		case "stopped":
-			return "\u25cf"; // ● — completed
+			return "✓"; // ✓ — completed
 		case "error":
-			return "\u25cf"; // ●
+			return "✗"; // ✗
 		default:
-			return "\u25cb";
+			return "○";
 	}
+}
+
+// Status pill badge: state-colored background + black text (orca-style).
+// The returned string always has a visible length of 6 (`" RUN  "` etc.) so it
+// aligns with padRight/visibleLength-based layout.
+const BLACK_FG = fg256(0);
+export function statusBadge(status: string): string {
+	const label = statusBadgeLabel(status);
+	const bg = statusBadgeBg(status);
+	return `${bg}${BLACK_FG}${BOLD} ${label} ${RESET}`;
+}
+
+// Logo-style agent icons in place of the type name. The official Claude brand
+// glyph is not in Nerd Fonts yet (https://github.com/ryanoasis/nerd-fonts/issues/2001);
+// swap these for the official codepoints once a release ships them. Until then:
+// Claude's starburst in brand orange, Codex as a filled hexagon — bold and the
+// visually largest plain-Unicode shapes available.
+export function agentTypeIcon(type: string): string {
+	switch (type) {
+		case "claude-code":
+			return `${BOLD}${fg256(173)}✺${RESET}`;
+		default:
+			return `${BOLD}${fg256(252)}⬢${RESET}`;
+	}
+}
+
+function statusBadgeLabel(status: string): string {
+	switch (status) {
+		case "running":
+			return "RUN ";
+		case "waiting":
+			return "WAIT";
+		case "stopped":
+			return "DONE";
+		case "error":
+			return "ERR ";
+		case "idle":
+			return "IDLE";
+		default:
+			return "??? ";
+	}
+}
+
+function statusBadgeBg(status: string): string {
+	switch (status) {
+		case "running":
+			return bg256(82); // bright green
+		case "waiting":
+			return bg256(220); // yellow
+		case "stopped":
+			return bg256(73); // teal
+		case "error":
+			return bg256(196); // red
+		case "idle":
+			return bg256(245); // gray
+		default:
+			return bg256(240);
+	}
+}
+
+// Human-readable elapsed time: 45s / 3m / 2h / 1d.
+export function formatElapsed(ms: number): string {
+	const clamped = ms < 0 ? 0 : ms;
+	const s = Math.floor(clamped / 1000);
+	if (s < 60) return `${s}s`;
+	const m = Math.floor(s / 60);
+	if (m < 60) return `${m}m`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h`;
+	const d = Math.floor(h / 24);
+	return `${d}d`;
 }
 
 // Utility functions
@@ -114,7 +191,7 @@ export function truncate(str: string, maxLen: number): string {
 			result += m[1];
 		} else if (m[2]) {
 			if (visCount >= maxLen - 1) {
-				result += `${RESET}\u2026`;
+				result += `${RESET}…`;
 				return result;
 			}
 			result += m[2];
@@ -147,12 +224,12 @@ export function clearLine(): string {
 
 // Box-drawing characters
 export const BOX = {
-	topLeft: "\u256d",
-	topRight: "\u256e",
-	bottomLeft: "\u2570",
-	bottomRight: "\u256f",
-	horizontal: "\u2500",
-	vertical: "\u2502",
-	teeRight: "\u251c",
-	teeLeft: "\u2524",
+	topLeft: "╭",
+	topRight: "╮",
+	bottomLeft: "╰",
+	bottomRight: "╯",
+	horizontal: "─",
+	vertical: "│",
+	teeRight: "├",
+	teeLeft: "┤",
 } as const;

@@ -2,10 +2,16 @@ import { loadConfig } from "../config/config.ts";
 import type { AgentState, AgentType, HubConfig } from "../types.ts";
 import {
 	findSessionByPath,
+	getAgentsDir,
 	readAgentState,
 	removeAgentFile,
 	writeAgentState,
 } from "../workspace/state.ts";
+import {
+	NOTIFY_DEBOUNCE_MS,
+	shouldNotifyForNotification,
+	tryAcquireNotifyLock,
+} from "./notify-lock.ts";
 import { postMacNotification, soundNameFromPath } from "./notify.ts";
 
 function sanitize(path: string): string {
@@ -99,8 +105,6 @@ const STATUS_MAP: Record<string, string> = {
 
 const ATTENTION_EVENTS = new Set(["PermissionRequest", "Notification"]);
 
-const NOTIFY_DEBOUNCE_MS = 3000;
-
 function pickSoundFile(eventName: string, sound: HubConfig["sound"]): string {
 	if (eventName === "PermissionRequest") return sound.permission_request;
 	return sound.notification;
@@ -110,9 +114,11 @@ function pickSoundFile(eventName: string, sound: HubConfig["sound"]): string {
  * Macos Notification Center plays its own sound, so when we post one we
  * suppress the standalone afplay path to avoid a double-beep.
  *
- * Skips emission entirely when the previous alert for this agent fired within
- * NOTIFY_DEBOUNCE_MS — Claude Code can emit Notification (idle_prompt) and
- * Stop back-to-back at turn end, which would otherwise double-beep.
+ * The debounce lock is acquired right before actually emitting (Mac
+ * notification or afplay), not up front — this lets an exclusive lock file
+ * (see notify-lock.ts) atomically arbitrate between events that fire nearly
+ * simultaneously (e.g. Notification and Stop at turn end) instead of racing
+ * on a plain timestamp comparison.
  *
  * Returns true when a notification or sound was emitted so the caller can
  * record `lastNotifiedAt`.
@@ -120,19 +126,22 @@ function pickSoundFile(eventName: string, sound: HubConfig["sound"]): string {
 function reactToEvent(
 	eventName: string,
 	payload: Record<string, unknown>,
-	lastNotifiedAt: number | undefined,
+	filename: string,
 	now: number,
 ): boolean {
 	if (process.env.CCDOCK_SILENT === "1") return false;
 	if (process.platform !== "darwin") return false;
-	if (lastNotifiedAt !== undefined && now - lastNotifiedAt < NOTIFY_DEBOUNCE_MS) return false;
 
 	const config = loadConfig();
 	const soundFile = pickSoundFile(eventName, config.sound);
+	const notificationAllowed = eventName !== "Notification" || shouldNotifyForNotification(payload);
 	const wantNotification =
-		config.notifications.enabled && config.notifications.events.includes(eventName);
+		config.notifications.enabled &&
+		config.notifications.events.includes(eventName) &&
+		notificationAllowed;
 
 	if (wantNotification) {
+		if (!tryAcquireNotifyLock(getAgentsDir(), filename, now, NOTIFY_DEBOUNCE_MS)) return false;
 		const cwd = (payload.cwd as string) ?? "";
 		const toolName = (payload.tool_name as string) ?? "";
 		const message = (payload.message as string) ?? toolName ?? eventName;
@@ -147,6 +156,7 @@ function reactToEvent(
 
 	if (!ATTENTION_EVENTS.has(eventName)) return false;
 	if (!config.sound.enabled || !soundFile) return false;
+	if (!tryAcquireNotifyLock(getAgentsDir(), filename, now, NOTIFY_DEBOUNCE_MS)) return false;
 	try {
 		// Detach so the hook can return without blocking on afplay's playback
 		// duration — otherwise the parent agent waits for the sound to finish.
@@ -188,6 +198,10 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 		return;
 	}
 
+	// By extension, SubagentStop is never handled either — it isn't in
+	// STATUS_MAP or the documented hooks setup, so subagent completion never
+	// reaches here and never triggers a notification.
+
 	const filename = `${sanitize(cwd)}-${claudeSessionId}.json`;
 
 	const mappedStatus = STATUS_MAP[eventName];
@@ -201,7 +215,7 @@ export async function handleHook(agentType: string, eventName: string): Promise<
 	// Mac notifications fire on whatever events the config subscribes to.
 	const prevState = readAgentState(filename);
 	const now = Date.now();
-	const emitted = reactToEvent(eventName, payload, prevState?.lastNotifiedAt, now);
+	const emitted = reactToEvent(eventName, payload, filename, now);
 	const lastNotifiedAt = emitted ? now : prevState?.lastNotifiedAt;
 
 	// Notification doesn't carry meaningful status info — preserve previous state

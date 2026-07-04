@@ -24,7 +24,7 @@ ccdock sits in a narrow terminal sidebar and takes care of the rest: auto-positi
 
 ## Features
 
-- **VS Code orchestration** — Auto-open, position, and switch VS Code (or Cursor) windows next to the sidebar. Click a session, and the right editor snaps into focus.
+- **VS Code orchestration** — Auto-open, position, and switch VS Code (or Cursor) windows next to the sidebar. Each session manages its own editor window. Clicking a session whose window is open snaps it straight into focus; clicking one whose window is closed asks for confirmation first (guarding against accidental opens).
 - **Real-time agent monitoring** — See exactly what each Claude Code agent is doing: which tool it's calling, what file it's reading, what command it's running.
 - **Git worktree management** — Create, switch, and delete worktrees via [git-wt](https://github.com/k1LoW/git-wt) integration. Each worktree gets its own session.
 - **Activity log** — Live feed of tool invocations with session numbers (#N) across all active agents.
@@ -60,6 +60,7 @@ Edit `~/.config/ccdock/config.json` (auto-created on first run):
 {
   "workspace_dirs": ["~/workspace"],
   "editor": "code",
+  "terminal": "ghostty",
   "sound": {
     "enabled": true,
     "permission_request": "/System/Library/Sounds/Funk.aiff",
@@ -76,6 +77,7 @@ Edit `~/.config/ccdock/config.json` (auto-created on first run):
 | -------------------------- | ------------------------------------------------------------------------------------ |
 | `workspace_dirs`           | Directories to scan for git repositories                                             |
 | `editor`                   | Editor command: `"code"` for VS Code, `"cursor"` for Cursor                          |
+| `terminal`                 | Terminal app for terminal sessions. Only `"ghostty"` is supported today              |
 | `sound.enabled`            | Play a sound when an agent surfaces a `PermissionRequest` / `Notification`           |
 | `sound.permission_request` | Sound file (afplay-compatible) for permission prompts                                |
 | `sound.notification`       | Sound file for general notifications                                                 |
@@ -92,6 +94,15 @@ When `notifications.enabled` is on, the sound is delivered by macOS as part of t
 Override the activated app with `CCDOCK_NOTIFY_BUNDLE_ID=<bundle.id>` (e.g. `com.googlecode.iterm2` for iTerm2). Set `CCDOCK_TERMINAL_NOTIFIER=/path/to/terminal-notifier` if it lives outside the standard Homebrew prefixes.
 
 Set `CCDOCK_SILENT=1` in the environment to mute every sound and notification regardless of config (handy for tests / quiet sessions). Other macOS system sounds live in `/System/Library/Sounds/` (Glass, Funk, Submarine, Ping, Sosumi, …).
+
+### Fast notifications (recommended)
+
+Claude Code can also notify you directly, without going through ccdock's hooks. In iTerm2, Ghostty, or Kitty, the `preferredNotifChannel` setting in `~/.claude/settings.json` (default `"auto"`) uses terminal OSC escape sequences (OSC 9 / 777) to pop a desktop notification instantly. Add `"preferredNotifChannel": "auto"` to `settings.json` if you want to set it explicitly.
+
+- On Ghostty, set `desktop-notifications = true` in `~/.config/ghostty/config` (some versions default to on already).
+- Over tmux, add `set -g allow-passthrough on` to `~/.tmux.conf` so the escape sequence reaches the outer terminal.
+
+This path is faster than ccdock's hook-based notifications (`terminal-notifier`/`osascript`) since it skips spawning a hook process and registering with Notification Center. If you enable it, avoid double notifications by setting `notifications.enabled` to `false` (or trimming `notifications.events`) in `~/.config/ccdock/config.json`. ccdock's `terminal-notifier`/`osascript` path remains useful as a fallback for environments without OSC support, such as the VS Code integrated terminal.
 
 ### 2. Set up Claude Code hooks
 
@@ -160,28 +171,38 @@ ccdock help     # show help
 
 ### Keybindings
 
-| Key          | Action                                  |
-| ------------ | --------------------------------------- |
-| `j` / `k`   | Navigate between sessions               |
-| `Enter`      | Focus editor window for selected session |
-| `Tab`        | Focus editor window (same as Enter)     |
-| `n`          | Create new session (interactive wizard) |
-| `d`          | Delete session                          |
-| `r`          | Realign all VS Code windows             |
-| `c`          | Toggle compact mode                     |
-| `l`          | Toggle activity log                     |
-| `q` / Ctrl+C | Quit (with option to close editors)    |
-| Mouse click  | Select session                          |
-| Scroll wheel | Navigate between sessions               |
+| Key          | Action                                                                                |
+| ------------ | -------------------------------------------------------------------------------------- |
+| `j` / `k`   | Navigate between sessions                                                              |
+| `Enter`      | Focus the session's editor window                                                     |
+| `Tab`        | Focus the session's editor window (same as Enter)                                     |
+| `n`          | Create new session (interactive wizard)                                               |
+| `d`          | Delete session                                                                         |
+| `w`          | Close the session's editor window                                                     |
+| `r`          | Realign all editor windows                                                            |
+| `t`          | Open a scratch Ghostty terminal at the workspace root (unmanaged — not tracked or positioned) |
+| `c`          | Toggle compact mode                                                                    |
+| `l`          | Toggle activity log                                                                    |
+| `q` / Ctrl+C | Quit (with option to close windows)                                                   |
+| Mouse click  | Focus the window if open, else confirm to open                                        |
+| Scroll wheel | Navigate between sessions                                                              |
 
 ### Session card states
 
+Each card manages a single VS Code (or Cursor) editor window for its worktree; the border and spinner reflect that window's state.
+
 | Card appearance | Meaning |
 | --------------- | ------- |
-| White border + green `●` | Editor is focused |
-| Normal border + green `●` | Editor is open but not focused |
-| Spinning `⠋` indicator | Editor is launching |
-| Dim border, no dot | Editor is closed |
+| White border | The card's window is focused |
+| Normal border | The card's window is open but not focused |
+| Spinning `⠋` indicator | The card's window is launching |
+| Dim border | The card's window is closed |
+
+### Scratch terminals
+
+Pressing `t` opens a brand-new [Ghostty](https://ghostty.org/) window at the first configured `workspace_dirs` entry. This window is entirely unmanaged: ccdock does not track it, position it next to the sidebar, or close it — it behaves exactly like a terminal you opened yourself. Use it for one-off shell commands outside any specific session.
+
+ccdock also uses Ghostty for one other purpose unrelated to `t`: at startup it tags its own window with a unique title (via an OSC escape sequence) so it can reliably identify itself and position itself on screen. The first time ccdock scripts Ghostty for this, macOS shows an **Automation** permission prompt ("ccdock wants to control Ghostty") — approve it (also available under System Settings → Privacy & Security → Automation).
 
 ### Agent status
 
@@ -209,7 +230,7 @@ ccdock sidebar (polls every 2s) <----------+
 - **State** — `~/.local/state/ccdock/` stores session and agent state as JSON files
 - **Hooks** — `ccdock hook` writes agent state files when Claude Code fires events
 - **Window management** — AppleScript via `osascript` to position VS Code next to the sidebar
-- **Wizard** — `n` key scans workspace dirs, offers create/existing/root worktree options via `git wt`
+- **Wizard** — `n` key scans workspace dirs and offers create/existing/root worktree options via `git wt`, opening the repository's editor window directly on selection
 
 ### File structure
 
@@ -221,6 +242,7 @@ src/
   config/config.ts     — Config (~/.config/ccdock/)
   workspace/state.ts   — Session/agent state persistence
   workspace/editor.ts  — VS Code open/focus
+  workspace/terminal.ts— Ghostty self-identification (sidebar window) + scratch terminal launch
   workspace/window.ts  — AppleScript window management
   worktree/manager.ts  — Git worktree operations
   worktree/scanner.ts  — Repository discovery

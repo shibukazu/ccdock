@@ -10,6 +10,7 @@ export type KeyAction =
 	| { type: "log" }
 	| { type: "realign" }
 	| { type: "window_close" }
+	| { type: "terminal_open" }
 	| { type: "mouse_click"; row: number; col: number }
 	| { type: "unknown" };
 
@@ -91,8 +92,11 @@ export function parseKey(data: Buffer): KeyAction {
 	// Realign VS Code windows: r
 	if (s === "r") return { type: "realign" };
 
-	// Close VS Code window for the selected session (keep session/worktree): w
+	// Close the managed window (editor or terminal) for the selected session: w
 	if (s === "w") return { type: "window_close" };
+
+	// Open a scratch Ghostty terminal at the workspace root: t
+	if (s === "t") return { type: "terminal_open" };
 
 	return { type: "unknown" };
 }
@@ -100,6 +104,17 @@ export function parseKey(data: Buffer): KeyAction {
 export function parseKeyWizard(data: Buffer): WizardKeyAction {
 	const raw = data.toString();
 	const s = normalizeFullwidth(raw);
+
+	// SGR mouse: \x1b[<button;col;rowM (press) or \x1b[<button;col;rowm (release)
+	const sgrMatch = s.match(/^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/);
+	if (sgrMatch) {
+		const button = Number.parseInt(sgrMatch[1]!, 10);
+		const isPress = sgrMatch[4] === "M";
+		// Scroll up/down
+		if (isPress && button === 64) return { type: "up" };
+		if (isPress && button === 65) return { type: "down" };
+		return { type: "unknown" };
+	}
 
 	// Escape sequences for arrow keys
 	if (s === "\x1b[A") return { type: "up" };

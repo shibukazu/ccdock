@@ -32,6 +32,12 @@ describe("parseKey (sidebar)", () => {
 		expect(parseKey(Buffer.from("l"))).toEqual({ type: "log" });
 		expect(parseKey(Buffer.from("r"))).toEqual({ type: "realign" });
 		expect(parseKey(Buffer.from("w"))).toEqual({ type: "window_close" });
+		expect(parseKey(Buffer.from("t"))).toEqual({ type: "terminal_open" });
+	});
+
+	test("t opens a scratch terminal, W is unbound", () => {
+		expect(parseKey(Buffer.from("t"))).toEqual({ type: "terminal_open" });
+		expect(parseKey(Buffer.from("W"))).toEqual({ type: "unknown" });
 	});
 
 	test("fullwidth shortcuts fire the same actions (IME on)", () => {
@@ -88,5 +94,14 @@ describe("parseKeyWizard", () => {
 
 	test("non-ASCII runes yield unknown (IME unconfirmed preview is out of scope)", () => {
 		expect(parseKeyWizard(Buffer.from("\u3042"))).toEqual({ type: "unknown" });
+	});
+
+	test("scroll wheel becomes up/down", () => {
+		expect(parseKeyWizard(Buffer.from("\x1b[<64;10;5M"))).toEqual({ type: "up" });
+		expect(parseKeyWizard(Buffer.from("\x1b[<65;10;5M"))).toEqual({ type: "down" });
+	});
+
+	test("other mouse events yield unknown, not stray char input", () => {
+		expect(parseKeyWizard(Buffer.from("\x1b[<0;12;5M"))).toEqual({ type: "unknown" });
 	});
 });

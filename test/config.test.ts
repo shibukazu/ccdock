@@ -89,6 +89,15 @@ describe("loadConfig sound section", () => {
 	});
 });
 
+describe("loadConfig terminal section", () => {
+	test("defaults to ghostty when terminal is missing", async () => {
+		writeConfig({ workspace_dirs: [], editor: "code" });
+		const { loadConfig } = await import(`../src/config/config.ts?t=${Date.now()}`);
+		const cfg = loadConfig();
+		expect(cfg.terminal).toBe("ghostty");
+	});
+});
+
 describe("loadConfig notifications section", () => {
 	test("defaults to enabled with Permission/Notification events", async () => {
 		const { loadConfig } = await import(`../src/config/config.ts?t=${Date.now()}`);

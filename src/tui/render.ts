@@ -1,4 +1,12 @@
-import type { DeleteConfirm, SidebarState, WorkspaceSession } from "../types.ts";
+import type {
+	DeleteConfirm,
+	PendingCreation,
+	SidebarState,
+	WindowCloseConfirm,
+	WindowOpenConfirm,
+	WorkspaceSession,
+} from "../types.ts";
+import type { WorktreeDiff } from "../worktree/diff.ts";
 
 const SPINNER_FRAMES = [
 	"\u280b",
@@ -21,9 +29,12 @@ import {
 	DIM,
 	RESET,
 	clearLine,
+	formatElapsed,
 	formatMem,
 	moveCursor,
 	shortenHome,
+	statusBadge,
+	agentTypeIcon,
 	statusColor,
 	statusIcon,
 	truncate,
@@ -34,6 +45,23 @@ function padRight(str: string, len: number): string {
 	const visible = visibleLength(str);
 	if (visible >= len) return str;
 	return str + " ".repeat(len - visible);
+}
+
+// Re-assert a background color after every RESET in the content so a selection
+// highlight spans the whole field even when inner segments reset their styling.
+function applyBg(content: string, bg: string): string {
+	return `${bg}${content.split(RESET).join(`${RESET}${bg}`)}${RESET}`;
+}
+
+// diff badge line body: `~files +additions -deletions`. Returns "" when there
+// are no changes at all so callers can skip the row.
+function diffBadgeText(diff: WorktreeDiff): string {
+	if (diff.files === 0 && diff.additions === 0 && diff.deletions === 0) return "";
+	const parts: string[] = [];
+	if (diff.files > 0) parts.push(`${COLORS.diffFile}~${diff.files}${RESET}`);
+	if (diff.additions > 0) parts.push(`${COLORS.diffAdd}+${diff.additions}${RESET}`);
+	if (diff.deletions > 0) parts.push(`${COLORS.diffDel}-${diff.deletions}${RESET}`);
+	return parts.join(" ");
 }
 
 function renderDeleteConfirm(deleteConfirm: DeleteConfirm): string[] {
@@ -61,6 +89,64 @@ function renderDeleteConfirm(deleteConfirm: DeleteConfirm): string[] {
 	return lines;
 }
 
+function renderWindowCloseConfirm(): string[] {
+	const lines: string[] = [];
+	lines.push(`  ${BOLD}${COLORS.waiting} Close editor window?${RESET}`);
+	lines.push(`  ${COLORS.subtitle}Session and worktree will be kept${RESET}`);
+	lines.push("");
+	lines.push(`  ${COLORS.muted}Enter: close | Esc: cancel${RESET}`);
+	return lines;
+}
+
+function renderWindowOpenConfirm(): string[] {
+	const lines: string[] = [];
+	lines.push(`  ${BOLD}${COLORS.waiting} Open editor window?${RESET}`);
+	lines.push("");
+	lines.push(`  ${COLORS.muted}Enter: open | Esc: cancel${RESET}`);
+	return lines;
+}
+
+/** One card body row: content padded to the card width between vertical borders. */
+function boxLine(content: string, width: number, borderColor: string, dimAll = ""): string {
+	return `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(content, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+}
+
+function renderPendingCard(pending: PendingCreation, cols: number, animFrame: number): string[] {
+	const lines: string[] = [];
+	const width = Math.max(cols - 2, 20);
+	const isError = pending.status === "error";
+	const borderColor = isError ? COLORS.error : COLORS.waiting;
+	const titleColor = isError ? COLORS.error : COLORS.waiting;
+
+	const topBorder = `${borderColor}${BOX.topLeft}${BOX.horizontal.repeat(width - 2)}${BOX.topRight}${RESET}`;
+	lines.push(topBorder);
+
+	const icon = isError ? "✕" : SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
+	const titleText = `${titleColor}${icon} ${pending.repoName}:${pending.branch}${RESET}`;
+	const titleTruncated = truncate(titleText, width - 4);
+	const titleLine = boxLine(titleTruncated, width, borderColor);
+	lines.push(titleLine);
+
+	if (isError) {
+		const errMsg = pending.errorMessage ?? "Unknown error";
+		const errTruncated = truncate(`${COLORS.error}${errMsg}${RESET}`, width - 4);
+		const errLine = boxLine(errTruncated, width, borderColor);
+		lines.push(errLine);
+
+		const hint = `${COLORS.muted}(press d to dismiss)${RESET}`;
+		const hintLine = boxLine(hint, width, borderColor);
+		lines.push(hintLine);
+	} else {
+		const msgLine = boxLine(pending.message, width, borderColor);
+		lines.push(msgLine);
+	}
+
+	const bottomBorder = `${borderColor}${BOX.bottomLeft}${BOX.horizontal.repeat(width - 2)}${BOX.bottomRight}${RESET}`;
+	lines.push(bottomBorder);
+
+	return lines;
+}
+
 function renderCard(
 	session: WorkspaceSession,
 	isSelected: boolean,
@@ -68,22 +154,25 @@ function renderCard(
 	animFrame: number,
 	compact: boolean,
 	deleteConfirm: DeleteConfirm | null,
+	windowCloseConfirm: WindowCloseConfirm | null,
+	windowOpenConfirm: WindowOpenConfirm | null,
 	sessionIndex: number,
 	isDeleting: boolean,
+	diff: WorktreeDiff | null,
 ): string[] {
 	const lines: string[] = [];
 	const width = Math.max(cols - 2, 20);
 
-	// Colors based on editor state
+	// Colors based on the card's managed-window state (editor or terminal).
 	// Focused: white border, normal title
-	// Open: normal border + green ● dot
+	// Open: normal border
 	// Closed: dim everything
 	// Deleting: error-colored border, spinner
 	const editorState = session.editorState;
 	const isFocused = editorState === "focused";
 	const isClosed = editorState === "closed";
 	const isLaunching = editorState === "launching";
-	// Border color: Deleting > VS Code focused > J/K selected > closed/open
+	// Border color: Deleting > focused > J/K selected > closed/open
 	const borderColor = isDeleting
 		? COLORS.error
 		: isFocused
@@ -97,8 +186,8 @@ function renderCard(
 	const detailColor = isClosed ? COLORS.editorClosed : COLORS.subtitle;
 	const dimAll = isClosed && !isDeleting ? DIM : "";
 
-	// Status indicator: spinner only while the editor is launching.
-	// Per-agent dots are rendered below; the session itself does not get one.
+	// Title-line spinner while the managed window is launching; open/focused state
+	// is otherwise conveyed via the border. Per-agent dots are rendered below.
 	let openDot = "";
 	if (isLaunching) {
 		const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
@@ -109,39 +198,54 @@ function renderCard(
 	const topBorder = `${dimAll}${borderColor}${BOX.topLeft}${BOX.horizontal.repeat(width - 2)}${BOX.topRight}${RESET}`;
 	lines.push(topBorder);
 
-	// Title line: #N + dot (if open) + icon + repo:branch
+	// Title line: #N + spinner (while launching) + icon + repo:branch, and an
+	// elapsed-time stamp (plus a \u25b8 chevron when selected) right-aligned at
+	// the far edge.
 	const icon = "\uf418";
 	const sessionNum = `${COLORS.muted}#${sessionIndex + 1}${RESET} `;
 	const titleText = `${titleColor}${icon} ${session.repoName}:${session.branch}${RESET}`;
-	const title = `${sessionNum}${openDot}${titleText}`;
-	const titleTruncated = truncate(title, width - 4);
-	const titleLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(titleTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+	const titleLeft = `${sessionNum}${openDot}${titleText}`;
+
+	// Right stamp: most-recent agent update, else the session's own activity time.
+	const latestAgentTs = session.agents.reduce((max, a) => Math.max(max, a.updatedAt), 0);
+	const stampBase = latestAgentTs > 0 ? latestAgentTs : session.lastActiveAt;
+	const elapsed = formatElapsed(Date.now() - stampBase);
+	const chevron = isSelected ? " \u203a" : "";
+	const rightStamp = `${COLORS.muted}${elapsed}${chevron}${RESET}`;
+	const rightWidth = visibleLength(rightStamp);
+
+	// Left column gets whatever the stamp does not use (min 1, leave a gap).
+	const leftWidth = Math.max(1, width - 4 - rightWidth - 1);
+	const leftTruncated = truncate(titleLeft, leftWidth);
+	// Pad the left so the stamp sits flush right within the width-4 field.
+	const titleInner = `${padRight(leftTruncated, width - 4 - rightWidth)}${rightStamp}`;
+	const titleField = isSelected ? applyBg(titleInner, COLORS.bgSelected) : titleInner;
+	const titleLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${titleField}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 	lines.push(titleLine);
 
 	if (!compact) {
 		// Path line
 		const shortPath = shortenHome(session.worktreePath);
 		const pathTruncated = truncate(shortPath, width - 4);
-		const pathColor = editorState === "closed" ? COLORS.editorClosed : COLORS.subtitle;
+		const pathColor = isClosed ? COLORS.editorClosed : COLORS.subtitle;
 		const pathLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${pathColor}${padRight(pathTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
 		lines.push(pathLine);
 
 		if (isDeleting) {
 			const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
 			const deleteText = `${COLORS.error}${frame} Deleting session...${RESET}`;
-			const deleteLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(deleteText, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+			const deleteLine = boxLine(deleteText, width, borderColor, dimAll);
 			lines.push(deleteLine);
 		} else if (session.agents.length === 0) {
 			const noAgent = `${DIM}no agents${RESET}`;
-			const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(noAgent, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+			const agentLine = boxLine(noAgent, width, borderColor, dimAll);
 			lines.push(agentLine);
 		} else {
 			for (const agent of session.agents) {
-				const sIcon = statusIcon(agent.status, animFrame);
-				const sColor = statusColor(agent.status);
-				const statusText = `${sColor}${sIcon} ${agent.status}${RESET}`;
-				const agentInfo = `${statusText} ${detailColor}${agent.agentType}${RESET}`;
-				const agentLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(agentInfo, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+				// Agent row: [ STATUS ] pill + agent logo icon.
+				const badge = statusBadge(agent.status);
+				const agentInfo = `${badge} ${agentTypeIcon(agent.agentType)}`;
+				const agentLine = boxLine(agentInfo, width, borderColor, dimAll);
 				lines.push(agentLine);
 
 				// Show latest tool activity
@@ -150,9 +254,19 @@ function renderCard(
 						? `${detailColor}${agent.toolName}${RESET} ${detailColor}${agent.toolDetail}${RESET}`
 						: `${detailColor}${agent.toolName}${RESET}`;
 					const detailTruncated = truncate(`  ${detail}`, width - 4);
-					const detailLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(detailTruncated, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+					const detailLine = boxLine(detailTruncated, width, borderColor, dimAll);
 					lines.push(detailLine);
 				}
+			}
+		}
+
+		// Working-tree diff badge (`~files +adds -dels`); omitted when unchanged.
+		if (diff) {
+			const badgeText = diffBadgeText(diff);
+			if (badgeText) {
+				const diffTruncated = truncate(badgeText, width - 4);
+				const diffLine = boxLine(diffTruncated, width, borderColor, dimAll);
+				lines.push(diffLine);
 			}
 		}
 	} else {
@@ -168,7 +282,12 @@ function renderCard(
 		} else {
 			agentSummary = `${DIM}no agents${RESET}`;
 		}
-		const compactLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(agentSummary, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+		if (diff) {
+			const badgeText = diffBadgeText(diff);
+			if (badgeText) agentSummary = `${agentSummary}  ${badgeText}`;
+		}
+		const compactSummary = truncate(agentSummary, width - 4);
+		const compactLine = boxLine(compactSummary, width, borderColor, dimAll);
 		lines.push(compactLine);
 	}
 
@@ -176,8 +295,24 @@ function renderCard(
 	if (isSelected && deleteConfirm && deleteConfirm.sessionId === session.id) {
 		const confirmLines = renderDeleteConfirm(deleteConfirm);
 		for (const cl of confirmLines) {
-			const confirmLine = `${dimAll}${borderColor}${BOX.vertical}${RESET} ${padRight(cl, width - 4)}${RESET} ${dimAll}${borderColor}${BOX.vertical}${RESET}`;
+			const confirmLine = boxLine(cl, width, borderColor, dimAll);
 			lines.push(confirmLine);
+		}
+	}
+
+	// Window close confirmation inline
+	if (isSelected && windowCloseConfirm && windowCloseConfirm.sessionId === session.id) {
+		const confirmLines = renderWindowCloseConfirm();
+		for (const cl of confirmLines) {
+			const confirmLine = boxLine(cl, width, borderColor, dimAll);
+			lines.push(confirmLine);
+		}
+	}
+
+	// Window open confirmation inline (accidental-click guard)
+	if (isSelected && windowOpenConfirm && windowOpenConfirm.sessionId === session.id) {
+		for (const cl of renderWindowOpenConfirm()) {
+			lines.push(boxLine(cl, width, borderColor, dimAll));
 		}
 	}
 
@@ -246,8 +381,9 @@ function renderFooter(cols: number): string[] {
 		`${BOLD}Enter${RESET} focus`,
 		`${BOLD}n${RESET} new`,
 		`${BOLD}d${RESET} del`,
-		`${BOLD}w${RESET} close win`,
+		`${BOLD}w${RESET} close`,
 		`${BOLD}r${RESET} realign`,
+		`${BOLD}t${RESET} term`,
 	].join(`${COLORS.muted} | ${RESET}`);
 	const line2 = [`${BOLD}c${RESET} compact`, `${BOLD}l${RESET} log`, `${BOLD}q${RESET} quit`].join(
 		`${COLORS.muted} | ${RESET}`,
@@ -267,8 +403,8 @@ function renderQuitConfirm(selectedIndex: number, cols: number): string[] {
 	lines.push("");
 
 	const options = [
-		"Quit sidebar only (keep VS Code open)",
-		"Quit sidebar and close all VS Code windows",
+		"Quit sidebar only (keep editors and terminals open)",
+		"Quit sidebar and close all editor and terminal windows",
 	];
 
 	for (let i = 0; i < options.length; i++) {
@@ -308,14 +444,24 @@ export function renderSidebar(state: SidebarState): string {
 	const usageHeight = usageLines.length;
 	const availableForCards = state.rows - headerHeight - footerHeight - logHeight - usageHeight;
 
-	// Render session cards
+	// Render pending creation cards (overlay, not part of state.sessions)
 	let linesUsed = 0;
-	state.cardRowRanges = [];
 	const cardStartOffset = output.length; // rows before cards (header)
+	for (const pending of state.pendingCreations) {
+		const pendingLines = renderPendingCard(pending, state.cols, state.animationFrame);
+		if (linesUsed + pendingLines.length > availableForCards) break;
+		output.push(...pendingLines);
+		linesUsed += pendingLines.length;
+	}
+
+	// Render session cards
+	state.cardRowRanges = [];
 	for (let i = 0; i < state.sessions.length; i++) {
 		const session = state.sessions[i];
 		if (!session) continue;
+
 		const isSelected = i === state.selectedIndex;
+		const diff = state.worktreeDiffs?.get(session.worktreePath) ?? null;
 		const cardLines = renderCard(
 			session,
 			isSelected,
@@ -323,8 +469,11 @@ export function renderSidebar(state: SidebarState): string {
 			state.animationFrame,
 			state.compactMode,
 			state.deleteConfirm,
+			state.windowCloseConfirm,
+			state.windowOpenConfirm,
 			i,
 			state.deletingSessionIds.has(session.id),
+			diff,
 		);
 
 		if (linesUsed + cardLines.length > availableForCards) break;

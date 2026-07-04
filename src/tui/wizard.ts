@@ -1,13 +1,13 @@
 import type { RepoInfo, WizardState, WorktreeEntry } from "../types.ts";
 import { BOLD, BOX, CLEAR_SCREEN, COLORS, CURSOR_HOME, DIM, RESET, truncate } from "./ansi.ts";
-
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+import { computeListWindow, matchesFilter } from "./list.ts";
 
 function renderRepoList(
 	repos: RepoInfo[],
 	selectedIndex: number,
 	filter: string,
 	cols: number,
+	rows: number,
 ): string[] {
 	const lines: string[] = [];
 	const width = Math.max(cols - 4, 20);
@@ -20,12 +20,25 @@ function renderRepoList(
 		lines.push("");
 	}
 
-	const filtered = repos.filter((r) => r.name.toLowerCase().includes(filter.toLowerCase()));
+	const filtered = repos.filter((r) => matchesFilter(r.name, filter));
 
 	if (filtered.length === 0) {
 		lines.push(`${DIM}  No repos matching "${filter}"${RESET}`);
 	} else {
-		for (let i = 0; i < filtered.length; i++) {
+		// Fixed lines already pushed (title, blank, optional filter+blank) plus the 2 footer lines below.
+		// When the list overflows, reserve rows for both indicators up front so the
+		// output never exceeds the terminal height.
+		const fixedLinesUsed = lines.length + 2;
+		const baseMaxVisible = Math.max(1, rows - fixedLinesUsed);
+		const maxVisible =
+			filtered.length > baseMaxVisible ? Math.max(1, baseMaxVisible - 2) : baseMaxVisible;
+		const window = computeListWindow(filtered.length, selectedIndex, maxVisible);
+
+		if (window.start > 0) {
+			lines.push(`${DIM}  ↑ ${window.start} more${RESET}`);
+		}
+
+		for (let i = window.start; i < window.end; i++) {
 			const repo = filtered[i];
 			if (!repo) continue;
 			const isSelected = i === selectedIndex;
@@ -37,10 +50,14 @@ function renderRepoList(
 			const line = ` ${marker} ${name} ${branch}`;
 			lines.push(truncate(line, width));
 		}
+
+		if (window.end < filtered.length) {
+			lines.push(`${DIM}  ↓ ${filtered.length - window.end} more${RESET}`);
+		}
 	}
 
 	lines.push("");
-	lines.push(`${COLORS.muted}  j/k: navigate | Enter: select | Esc: cancel${RESET}`);
+	lines.push(`${COLORS.muted}  ↑/↓: navigate | Enter: select | Esc: cancel${RESET}`);
 	lines.push(`${COLORS.muted}  Type to filter repos${RESET}`);
 
 	return lines;
@@ -57,10 +74,6 @@ function renderModeSelect(repo: RepoInfo, selectedIndex: number, cols: number): 
 
 	const modes = [
 		{ label: "Create new worktree (git wt)", desc: "Create a new feature branch worktree" },
-		{
-			label: "Create worktree from remote branch",
-			desc: "Check out an existing origin/* branch",
-		},
 		{ label: "Use existing worktree", desc: "Select from existing worktrees" },
 		{ label: "Open repository root", desc: "Open the main repository directory" },
 	];
@@ -88,7 +101,9 @@ function renderWorktreeList(
 	repo: RepoInfo,
 	worktrees: WorktreeEntry[],
 	selectedIndex: number,
+	filter: string,
 	cols: number,
+	rows: number,
 ): string[] {
 	const lines: string[] = [];
 	const width = Math.max(cols - 4, 20);
@@ -96,11 +111,41 @@ function renderWorktreeList(
 	lines.push(`${BOLD}${COLORS.highlight} Select Worktree: ${repo.name}${RESET}`);
 	lines.push("");
 
-	if (worktrees.length === 0) {
-		lines.push(`${DIM}  No existing worktrees found.${RESET}`);
+	if (filter) {
+		lines.push(`${COLORS.muted}  Filter: ${RESET}${filter}`);
+		lines.push("");
+	}
+
+	const filtered = worktrees.filter(
+		(wt) => matchesFilter(wt.branch, filter) || matchesFilter(wt.path, filter),
+	);
+
+	if (filtered.length === 0) {
+		lines.push(
+			filter
+				? `${DIM}  No worktrees matching "${filter}"${RESET}`
+				: `${DIM}  No existing worktrees found.${RESET}`,
+		);
 	} else {
-		for (let i = 0; i < worktrees.length; i++) {
-			const wt = worktrees[i];
+		// Fixed lines already pushed (title, blank, optional filter+blank) plus the 2 footer lines below.
+		// Each entry costs 2 rows (branch + path); each shown indicator costs 1 row.
+		// When the list overflows, reserve rows for both indicators up front so the
+		// output never exceeds the terminal height.
+		const fixedLinesUsed = lines.length + 2;
+		const baseRemainingRows = Math.max(0, rows - fixedLinesUsed);
+		const baseMaxVisible = Math.max(1, Math.floor(baseRemainingRows / 2));
+		const maxVisible =
+			filtered.length > baseMaxVisible
+				? Math.max(1, Math.floor(Math.max(0, baseRemainingRows - 2) / 2))
+				: baseMaxVisible;
+		const window = computeListWindow(filtered.length, selectedIndex, maxVisible);
+
+		if (window.start > 0) {
+			lines.push(`${DIM}  ↑ ${window.start} more${RESET}`);
+		}
+
+		for (let i = window.start; i < window.end; i++) {
+			const wt = filtered[i];
 			if (!wt) continue;
 			const isSelected = i === selectedIndex;
 			const marker = isSelected ? `${COLORS.highlight}\u25b6${RESET}` : " ";
@@ -111,10 +156,15 @@ function renderWorktreeList(
 			lines.push(truncate(` ${marker} ${branchLabel}`, width));
 			lines.push(truncate(`     ${pathLabel}`, width));
 		}
+
+		if (window.end < filtered.length) {
+			lines.push(`${DIM}  ↓ ${filtered.length - window.end} more${RESET}`);
+		}
 	}
 
 	lines.push("");
-	lines.push(`${COLORS.muted}  j/k: navigate | Enter: select | Esc: back${RESET}`);
+	lines.push(`${COLORS.muted}  ↑/↓: navigate | Enter: select | Esc: back${RESET}`);
+	lines.push(`${COLORS.muted}  Type to filter worktrees${RESET}`);
 
 	return lines;
 }
@@ -185,100 +235,12 @@ function renderFetchChoice(repo: RepoInfo, selectedIndex: number, cols: number):
 	return lines;
 }
 
-function renderRemoteBranchList(
-	repo: RepoInfo,
-	branches: string[],
-	selectedIndex: number,
-	filter: string,
+export function renderWizard(
+	wizard: WizardState,
 	cols: number,
-): string[] {
-	const lines: string[] = [];
-	const width = Math.max(cols - 4, 20);
-
-	lines.push(`${BOLD}${COLORS.highlight} Select Remote Branch: ${repo.name}${RESET}`);
-	lines.push(`${COLORS.muted}  (local cache — run \`git fetch\` in a shell to refresh)${RESET}`);
-	lines.push("");
-
-	if (filter) {
-		lines.push(`${COLORS.muted}  Filter: ${RESET}${filter}`);
-		lines.push("");
-	}
-
-	const filtered = branches.filter((b) => b.toLowerCase().includes(filter.toLowerCase()));
-
-	if (filtered.length === 0) {
-		lines.push(
-			`${DIM}  ${branches.length === 0 ? "No remote branches in local cache." : `No branches matching "${filter}"`}${RESET}`,
-		);
-	} else {
-		for (let i = 0; i < filtered.length; i++) {
-			const branch = filtered[i];
-			if (!branch) continue;
-			const isSelected = i === selectedIndex;
-			const marker = isSelected ? `${COLORS.highlight}\u25b6${RESET}` : " ";
-			const label = isSelected
-				? `${BOLD}${COLORS.title}${branch}${RESET}`
-				: `${COLORS.subtitle}${branch}${RESET}`;
-			lines.push(truncate(` ${marker} ${label}`, width));
-		}
-	}
-
-	lines.push("");
-	lines.push(`${COLORS.muted}  j/k: navigate | Enter: select | Esc: back${RESET}`);
-	lines.push(`${COLORS.muted}  Type to filter branches${RESET}`);
-
-	return lines;
-}
-
-function renderLocalBranchInput(
-	repo: RepoInfo,
-	remoteRef: string,
-	localBranch: string,
-	cols: number,
-): string[] {
-	const lines: string[] = [];
-	const width = Math.max(cols - 4, 20);
-
-	lines.push(`${BOLD}${COLORS.highlight} Create Session: ${repo.name}${RESET}`);
-	lines.push("");
-	lines.push(`${COLORS.muted}  From: ${remoteRef}${RESET}`);
-	lines.push(`${COLORS.muted}  Enter local branch name:${RESET}`);
-	lines.push("");
-	lines.push(`  ${COLORS.border}${BOX.horizontal.repeat(width - 6)}${RESET}`);
-	lines.push(`  ${BOLD}${localBranch}${RESET}\u2588`);
-	lines.push(`  ${COLORS.border}${BOX.horizontal.repeat(width - 6)}${RESET}`);
-	lines.push("");
-
-	if (localBranch) {
-		const preview = `${repo.name}--${localBranch.replace(/\//g, "-")}`;
-		lines.push(`${COLORS.muted}  Worktree dir: ${preview}${RESET}`);
-	}
-
-	lines.push("");
-	lines.push(`${COLORS.muted}  Enter: create | Esc: back${RESET}`);
-
-	return lines;
-}
-
-function renderCreating(
-	repo: RepoInfo,
-	message: string,
-	cols: number,
-	animFrame: number,
-): string[] {
-	const lines: string[] = [];
-	const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
-
-	lines.push(`${BOLD}${COLORS.highlight} Creating Session: ${repo.name}${RESET}`);
-	lines.push("");
-	lines.push(`  ${COLORS.highlight}${frame}${RESET} ${message}`);
-	lines.push("");
-	lines.push(`${COLORS.muted}  Please wait...${RESET}`);
-
-	return lines;
-}
-
-export function renderWizard(wizard: WizardState, cols: number, animFrame = 0): string {
+	rows: number,
+	animFrame = 0,
+): string {
 	if (!wizard) return "";
 
 	const output: string[] = [];
@@ -288,34 +250,26 @@ export function renderWizard(wizard: WizardState, cols: number, animFrame = 0): 
 
 	switch (wizard.step) {
 		case "select-repo":
-			content = renderRepoList(wizard.repos, wizard.selectedIndex, wizard.filter, cols);
+			content = renderRepoList(wizard.repos, wizard.selectedIndex, wizard.filter, cols, rows);
 			break;
 		case "select-mode":
 			content = renderModeSelect(wizard.repo, wizard.selectedIndex, cols);
 			break;
 		case "select-worktree":
-			content = renderWorktreeList(wizard.repo, wizard.worktrees, wizard.selectedIndex, cols);
+			content = renderWorktreeList(
+				wizard.repo,
+				wizard.worktrees,
+				wizard.selectedIndex,
+				wizard.filter,
+				cols,
+				rows,
+			);
 			break;
 		case "fetch-choice":
 			content = renderFetchChoice(wizard.repo, wizard.selectedIndex, cols);
 			break;
 		case "enter-branch":
 			content = renderBranchInput(wizard.repo, wizard.branchName, wizard.fetchBeforeCreate, cols);
-			break;
-		case "select-remote-branch":
-			content = renderRemoteBranchList(
-				wizard.repo,
-				wizard.branches,
-				wizard.selectedIndex,
-				wizard.filter,
-				cols,
-			);
-			break;
-		case "enter-local-branch":
-			content = renderLocalBranchInput(wizard.repo, wizard.remoteRef, wizard.localBranch, cols);
-			break;
-		case "creating":
-			content = renderCreating(wizard.repo, wizard.message, cols, animFrame);
 			break;
 	}
 

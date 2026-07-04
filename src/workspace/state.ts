@@ -123,6 +123,15 @@ export function cleanStaleAgents(): void {
 	for (const file of files) {
 		try {
 			const filePath = join(agentsDir, file);
+
+			// Migration: a legacy `<sanitized cwd>-<session id>.json` file is
+			// superseded by its session-keyed twin `<session id>.json`.
+			const stem = file.slice(0, -".json".length);
+			if (files.some((f) => f !== file && stem.endsWith(`-${f.slice(0, -".json".length)}`))) {
+				unlinkSync(filePath);
+				continue;
+			}
+
 			const raw = readFileSync(filePath, "utf-8");
 			const parsed = JSON.parse(raw) as AgentState;
 

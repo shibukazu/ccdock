@@ -34,7 +34,6 @@ import {
 	moveCursor,
 	shortenHome,
 	statusBadge,
-	agentTypeIcon,
 	statusColor,
 	statusIcon,
 	truncate,
@@ -242,9 +241,9 @@ function renderCard(
 			lines.push(agentLine);
 		} else {
 			for (const agent of session.agents) {
-				// Agent row: [ STATUS ] pill + agent logo icon.
+				// Agent row: [ STATUS ] pill + agent type name.
 				const badge = statusBadge(agent.status);
-				const agentInfo = `${badge} ${agentTypeIcon(agent.agentType)}`;
+				const agentInfo = `${badge} ${detailColor}${agent.agentType}${RESET}`;
 				const agentLine = boxLine(agentInfo, width, borderColor, dimAll);
 				lines.push(agentLine);
 
@@ -434,11 +433,14 @@ export function renderSidebar(state: SidebarState): string {
 	// Header
 	const header = `${BOLD}${COLORS.highlight} ccdock${RESET} ${COLORS.muted}(${state.sessions.length} sessions)${RESET}`;
 	output.push(header);
+	if (state.hookWarning) {
+		output.push(`${COLORS.waiting}⚠ ${truncate(state.hookWarning, state.cols - 3)}${RESET}`);
+	}
 	output.push("");
 
 	// Calculate available space
 	const footerHeight = 3;
-	const headerHeight = 2;
+	const headerHeight = state.hookWarning ? 3 : 2;
 	const logHeight = state.showActivityLog ? Math.min(8, state.activityLog.length + 2) : 0;
 	const usageLines = renderUsageSummary(state);
 	const usageHeight = usageLines.length;

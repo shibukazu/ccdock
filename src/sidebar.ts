@@ -25,6 +25,7 @@ import {
 } from "./workspace/state.ts";
 import { createWorktree, listWorktrees, removeWorktree } from "./worktree/manager.ts";
 import { scanRepos } from "./worktree/scanner.ts";
+import { findBrokenHookCommands } from "./agent/hook-check.ts";
 import { sampleAppUsageByName, sampleProcessUsage } from "./agent/usage.ts";
 
 function sessionNameFromBranch(branchName: string): string {
@@ -54,6 +55,7 @@ function createInitialState(editor: HubConfig["editor"]): SidebarState {
 		editor,
 		editorUsage: null,
 		worktreeDiffs: new Map(),
+		hookWarning: null,
 		sidebarWindowId: null,
 	};
 }
@@ -691,6 +693,14 @@ export async function runSidebar(): Promise<void> {
 	process.stdout.write(`\x1b]2;${sidebarTitle}\x07`);
 	await Bun.sleep(250);
 	state.sidebarWindowId = await getSidebarGhosttyWindowId(sidebarTitle);
+
+	// Detect broken ccdock hook commands once at startup (e.g. a dangling
+	// symlink after a bun install/upgrade breaks notifications silently).
+	const brokenHooks = findBrokenHookCommands();
+	state.hookWarning =
+		brokenHooks.length > 0
+			? `Claude Code hook broken: ${brokenHooks[0]} not found (notifications/status frozen)`
+			: null;
 
 	// Initial load
 	await refreshSessions(state);

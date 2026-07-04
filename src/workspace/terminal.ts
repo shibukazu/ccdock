@@ -270,12 +270,17 @@ export async function focusTerminalWindow(
 	if (!match) return false;
 	try {
 		const escapedId = escapeAppleScriptString(match.id);
+		// Same specifier-parsing caveat as `close window`: resolve a reference
+		// first instead of the inline `activate window id "..."` form.
 		await runOsascript(`
 tell application "Ghostty"
 	activate
-	try
-		activate window id "${escapedId}"
-	end try
+	repeat with w in windows
+		if (id of w) as string is "${escapedId}" then
+			activate window (contents of w)
+			exit repeat
+		end if
+	end repeat
 end tell
 `);
 	} catch {
@@ -299,11 +304,17 @@ export async function closeTerminalWindow(
 	if (!match) return;
 	try {
 		const escapedId = escapeAppleScriptString(match.id);
+		// Ghostty's custom `close window` command takes a window specifier; the
+		// inline `close window id "..."` form fails to parse, so resolve a
+		// reference first.
 		await runOsascript(`
 tell application "Ghostty"
-	try
-		close window id "${escapedId}"
-	end try
+	repeat with w in windows
+		if (id of w) as string is "${escapedId}" then
+			close window (contents of w)
+			exit repeat
+		end if
+	end repeat
 end tell
 `);
 	} catch {

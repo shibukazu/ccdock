@@ -7,7 +7,6 @@ import type {
 	WorkspaceSession,
 } from "../types.ts";
 import type { WorktreeDiff } from "../worktree/diff.ts";
-import { GROUP_LABELS, type SessionGroup, groupOfSession } from "./grouping.ts";
 
 const SPINNER_FRAMES = [
 	"\u280b",
@@ -29,7 +28,6 @@ import {
 	CURSOR_HOME,
 	DIM,
 	RESET,
-	agentTypeIcon,
 	clearLine,
 	formatElapsed,
 	formatMem,
@@ -52,14 +50,6 @@ function padRight(str: string, len: number): string {
 // highlight spans the whole field even when inner segments reset their styling.
 function applyBg(content: string, bg: string): string {
 	return `${bg}${content.split(RESET).join(`${RESET}${bg}`)}${RESET}`;
-}
-
-// Group heading row: `── Active (2) ──────────` in a muted rule style.
-function groupHeading(group: SessionGroup, count: number, width: number): string {
-	const label = `${GROUP_LABELS[group]} (${count})`;
-	const prefix = `── ${label} `;
-	const fill = Math.max(0, width - visibleLength(prefix));
-	return `${COLORS.muted}${prefix}${"─".repeat(fill)}${RESET}`;
 }
 
 // diff badge line body: `~files +additions -deletions`. Returns "" when there
@@ -270,11 +260,9 @@ function renderCard(
 			lines.push(agentLine);
 		} else {
 			for (const agent of session.agents) {
-				// Agent row: [ STATUS ] pill + agent-type glyph + type name.
+				// Agent row: [ STATUS ] pill + type name.
 				const badge = statusBadge(agent.status);
-				const sColor = statusColor(agent.status);
-				const typeIcon = `${sColor}${agentTypeIcon(agent.agentType)}${RESET}`;
-				const agentInfo = `${badge} ${typeIcon} ${detailColor}${agent.agentType}${RESET}`;
+				const agentInfo = `${badge} ${detailColor}${agent.agentType}${RESET}`;
 				const agentLine = boxLine(agentInfo, width, borderColor, dimAll);
 				lines.push(agentLine);
 
@@ -485,26 +473,11 @@ export function renderSidebar(state: SidebarState): string {
 		linesUsed += pendingLines.length;
 	}
 
-	// Render session cards, grouped by state (Active → Ready → Closed). The
-	// sessions array is already sorted into group order upstream, so a group
-	// heading is emitted whenever the group changes. Headings sit outside
-	// cardRowRanges (like pending cards) so they are never click targets.
+	// Render session cards
 	state.cardRowRanges = [];
-	const width = Math.max(state.cols - 2, 20);
-	// Per-group counts (whole array, independent of what fits on screen).
-	const groupCounts = new Map<string, number>();
-	for (const s of state.sessions) {
-		const g = groupOfSession(s);
-		groupCounts.set(g, (groupCounts.get(g) ?? 0) + 1);
-	}
-	let currentGroup: string | null = null;
 	for (let i = 0; i < state.sessions.length; i++) {
 		const session = state.sessions[i];
 		if (!session) continue;
-
-		const group = groupOfSession(session);
-		const headingLine =
-			group !== currentGroup ? groupHeading(group, groupCounts.get(group) ?? 0, width) : null;
 
 		const isSelected = i === state.selectedIndex;
 		const diff = state.worktreeDiffs?.get(session.worktreePath) ?? null;
@@ -522,13 +495,7 @@ export function renderSidebar(state: SidebarState): string {
 			diff,
 		);
 
-		const extra = headingLine ? 1 : 0;
-		if (linesUsed + extra + cardLines.length > availableForCards) break;
-		if (headingLine) {
-			output.push(headingLine);
-			linesUsed += 1;
-			currentGroup = group;
-		}
+		if (linesUsed + cardLines.length > availableForCards) break;
 		const startRow = cardStartOffset + linesUsed + 1; // 1-based row
 		state.cardRowRanges.push({
 			sessionIndex: i,

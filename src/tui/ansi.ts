@@ -138,18 +138,6 @@ function statusBadgeBg(status: string): string {
 	}
 }
 
-// Agent-type glyphs (single-width, non-nerd-font).
-export function agentTypeIcon(type: string): string {
-	switch (type) {
-		case "claude-code":
-			return "✦"; // ✦
-		case "codex":
-			return "◇"; // ◇
-		default:
-			return "◇";
-	}
-}
-
 // Human-readable elapsed time: 45s / 3m / 2h / 1d.
 export function formatElapsed(ms: number): string {
 	const clamped = ms < 0 ? 0 : ms;

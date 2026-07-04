@@ -9,7 +9,6 @@ import {
 	windowMatches,
 } from "./workspace/window.ts";
 import { disableRawMode, enableRawMode, parseKey, parseKeyWizard } from "./tui/input.ts";
-import { sortSessionsByGroup } from "./tui/grouping.ts";
 import { matchesFilter } from "./tui/list.ts";
 import { renderSidebar } from "./tui/render.ts";
 import { renderWizard } from "./tui/wizard.ts";
@@ -214,20 +213,8 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 		}
 	}
 
-	// Group sessions (Active → Ready → Closed) so the display order matches the
-	// array order — keeping j/k, click, and delete indexing correct. The sort is
-	// stable, so within a group the load order (lastActiveAt desc) is preserved.
-	// Remember the selected session's id so grouping doesn't move the cursor to a
-	// different card.
-	const selectedId = state.sessions[state.selectedIndex]?.id;
-	const sortedSessions = sortSessionsByGroup(sessions);
-	state.sessions = sortedSessions;
+	state.sessions = sessions;
 
-	// Re-anchor the selection on the same session after reordering.
-	if (selectedId) {
-		const newIndex = sortedSessions.findIndex((s) => s.id === selectedId);
-		if (newIndex >= 0) state.selectedIndex = newIndex;
-	}
 	// Keep selectedIndex in bounds
 	if (state.selectedIndex >= state.sessions.length) {
 		state.selectedIndex = Math.max(0, state.sessions.length - 1);
@@ -245,7 +232,7 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 				minute: "2-digit",
 				second: "2-digit",
 			});
-			const sessionIdx = sortedSessions.findIndex(
+			const sessionIdx = state.sessions.findIndex(
 				(s) =>
 					agent.sessionId === s.id ||
 					agent.cwd === s.worktreePath ||

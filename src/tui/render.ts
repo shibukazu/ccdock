@@ -100,10 +100,11 @@ function renderWindowCloseConfirm(target: WindowCloseConfirm["target"]): string[
 	return lines;
 }
 
-function renderWindowOpenConfirm(): string[] {
+function renderWindowOpenConfirm(kind: WindowOpenConfirm["kind"]): string[] {
 	const lines: string[] = [];
 
-	lines.push(`  ${BOLD}${COLORS.waiting} Open editor window?${RESET}`);
+	const heading = kind === "terminal" ? "Open terminal window?" : "Open editor window?";
+	lines.push(`  ${BOLD}${COLORS.waiting} ${heading}${RESET}`);
 	lines.push("");
 	lines.push(`  ${COLORS.muted}Enter: open | Esc: cancel${RESET}`);
 
@@ -167,20 +168,16 @@ function renderCard(
 	const lines: string[] = [];
 	const width = Math.max(cols - 2, 20);
 
-	// Colors based on editor state
+	// Colors based on the card's managed-window state (editor or terminal).
 	// Focused: white border, normal title
-	// Open: normal border + green ● dot
+	// Open: normal border
 	// Closed: dim everything
 	// Deleting: error-colored border, spinner
 	const editorState = session.editorState;
-	const terminalState = session.terminalState;
-	const isFocused = editorState === "focused" || terminalState === "focused";
-	// "Closed" (dim) styling only applies when both the editor and terminal are
-	// closed — an open terminal keeps the card visually active.
-	const isClosed = editorState === "closed" && terminalState === "closed";
+	const isFocused = editorState === "focused";
+	const isClosed = editorState === "closed";
 	const isLaunching = editorState === "launching";
-	const isTerminalLaunching = terminalState === "launching";
-	// Border color: Deleting > editor/terminal focused > J/K selected > closed/open
+	// Border color: Deleting > focused > J/K selected > closed/open
 	const borderColor = isDeleting
 		? COLORS.error
 		: isFocused
@@ -194,35 +191,26 @@ function renderCard(
 	const detailColor = isClosed ? COLORS.editorClosed : COLORS.subtitle;
 	const dimAll = isClosed && !isDeleting ? DIM : "";
 
-	// Status indicators on the title line:
-	//   - editor: spinner while launching (state is otherwise shown via border).
-	//   - terminal: a `T` badge — spinner while launching, teal when open/focused.
-	// Per-agent dots are rendered below; the session itself does not get one.
+	// Title-line spinner while the managed window is launching; open/focused state
+	// is otherwise conveyed via the border. Per-agent dots are rendered below.
 	let openDot = "";
 	if (isLaunching) {
 		const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
 		openDot = `${COLORS.waiting}${frame}${RESET} `;
-	}
-	let terminalDot = "";
-	if (isTerminalLaunching) {
-		const frame = SPINNER_FRAMES[animFrame % SPINNER_FRAMES.length]!;
-		terminalDot = `${COLORS.waiting}${frame}T${RESET} `;
-	} else if (terminalState === "focused") {
-		terminalDot = `${COLORS.editorFocused}●T${RESET} `;
-	} else if (terminalState === "open") {
-		terminalDot = `${COLORS.stopped}●T${RESET} `;
 	}
 
 	// Card border top
 	const topBorder = `${dimAll}${borderColor}${BOX.topLeft}${BOX.horizontal.repeat(width - 2)}${BOX.topRight}${RESET}`;
 	lines.push(topBorder);
 
-	// Title line: #N + dot (if open) + icon + repo:branch, with an elapsed-time
-	// stamp (and a \u25b8 chevron when selected) right-aligned at the far edge.
+	// Title line: #N + spinner (while launching) + icon + repo:branch, with a
+	// dim ` terminal` suffix on terminal cards, and an elapsed-time stamp (plus a
+	// \u25b8 chevron when selected) right-aligned at the far edge.
 	const icon = "\uf418";
 	const sessionNum = `${COLORS.muted}#${sessionIndex + 1}${RESET} `;
-	const titleText = `${titleColor}${icon} ${session.repoName}:${session.branch}${RESET}`;
-	const titleLeft = `${sessionNum}${openDot}${terminalDot}${titleText}`;
+	const kindTag = session.kind === "terminal" ? `${DIM} terminal${RESET}` : "";
+	const titleText = `${titleColor}${icon} ${session.repoName}:${session.branch}${RESET}${kindTag}`;
+	const titleLeft = `${sessionNum}${openDot}${titleText}`;
 
 	// Right stamp: most-recent agent update, else the session's own activity time.
 	const latestAgentTs = session.agents.reduce((max, a) => Math.max(max, a.updatedAt), 0);
@@ -329,7 +317,7 @@ function renderCard(
 
 	// Window open confirmation inline (accidental-click guard)
 	if (isSelected && windowOpenConfirm && windowOpenConfirm.sessionId === session.id) {
-		for (const cl of renderWindowOpenConfirm()) {
+		for (const cl of renderWindowOpenConfirm(windowOpenConfirm.kind)) {
 			lines.push(boxLine(cl, width, borderColor, dimAll));
 		}
 	}
@@ -399,9 +387,7 @@ function renderFooter(cols: number): string[] {
 		`${BOLD}Enter${RESET} focus`,
 		`${BOLD}n${RESET} new`,
 		`${BOLD}d${RESET} del`,
-		`${BOLD}t${RESET} term`,
-		`${BOLD}w${RESET} close ed`,
-		`${BOLD}W${RESET} close term`,
+		`${BOLD}w${RESET} close`,
 		`${BOLD}r${RESET} realign`,
 	].join(`${COLORS.muted} | ${RESET}`);
 	const line2 = [`${BOLD}c${RESET} compact`, `${BOLD}l${RESET} log`, `${BOLD}q${RESET} quit`].join(

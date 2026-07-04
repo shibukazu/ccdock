@@ -43,9 +43,9 @@ function buildSession(overrides: Partial<WorkspaceSession> = {}): WorkspaceSessi
 		worktreePath: "/tmp/repo",
 		branch: "main",
 		repoName: "repo",
+		kind: "editor",
 		agents: [],
 		editorState: "open",
-		terminalState: "closed",
 		createdAt: 0,
 		lastActiveAt: 0,
 		...overrides,
@@ -177,5 +177,27 @@ describe("cleanStaleAgents", () => {
 		);
 		cleanStaleAgents();
 		expect(existsSync(p)).toBe(true);
+	});
+});
+
+describe("loadSessions kind field", () => {
+	test("defaults kind to editor for sessions written without it (back-compat)", async () => {
+		const { loadSessions } = await import(`../src/workspace/state.ts?t=${Date.now()}`);
+		// Session JSON predating the kind field: write raw without kind.
+		const { kind: _kind, ...legacy } = buildSession({ id: "legacy" });
+		const dir = join(stateRoot, "ccdock", "sessions");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "legacy.json"), JSON.stringify(legacy));
+
+		const loaded = loadSessions().find((s: WorkspaceSession) => s.id === "legacy");
+		expect(loaded?.kind).toBe("editor");
+	});
+
+	test("round-trips a terminal session", async () => {
+		const { loadSessions } = await import(`../src/workspace/state.ts?t=${Date.now()}`);
+		writeSession(buildSession({ id: "term1", kind: "terminal" }));
+
+		const loaded = loadSessions().find((s: WorkspaceSession) => s.id === "term1");
+		expect(loaded?.kind).toBe("terminal");
 	});
 });

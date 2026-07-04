@@ -72,15 +72,13 @@ function createInitialState(editor: HubConfig["editor"]): SidebarState {
 const DIFF_TTL_MS = 8000;
 const diffCache = new Map<string, { at: number; diff: WorktreeDiff | null }>();
 
-// Refresh diffs for sessions whose editor or terminal is not closed, honoring
-// the per-worktree TTL. Fetches run concurrently. The resulting snapshot is
-// stored on state.worktreeDiffs for the renderer to read; the cache itself is
+// Refresh diffs for sessions whose managed window is not closed, honoring the
+// per-worktree TTL. Fetches run concurrently. The resulting snapshot is stored
+// on state.worktreeDiffs for the renderer to read; the cache itself is
 // module-level so it survives the 2s disk-rebuild of the sessions array.
 async function refreshWorktreeDiffs(state: SidebarState): Promise<void> {
 	const now = Date.now();
-	const targets = state.sessions.filter(
-		(s) => s.editorState !== "closed" || s.terminalState !== "closed",
-	);
+	const targets = state.sessions.filter((s) => s.editorState !== "closed");
 
 	const stale = targets.filter((s) => {
 		const cached = diffCache.get(s.worktreePath);
@@ -111,9 +109,11 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 		.filter((a) => a.status === "running" || a.status === "waiting" || a.status === "idle")
 		.map((a) => a.pid)
 		.filter((p): p is number => typeof p === "number" && p > 0);
-	// Skip the system-wide `ps -axo` scan when no session has an editor window
+	// Skip the system-wide `ps -axo` scan when no editor-kind session has a window
 	// open — saves the per-refresh cost on machines with hundreds of processes.
-	const needEditorUsage = state.sessions.some((s) => s.editorState !== "closed");
+	const needEditorUsage = state.sessions.some(
+		(s) => s.kind === "editor" && s.editorState !== "closed",
+	);
 	const [agentUsage, editorUsage] = await Promise.all([
 		livePids.length > 0 ? sampleProcessUsage(livePids) : Promise.resolve(new Map()),
 		needEditorUsage
@@ -157,16 +157,15 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 		}
 	}
 
-	// Detect editor + terminal window state for each session. The sidebar's own
+	// Detect each session's managed-window state per its kind. The sidebar's own
 	// Ghostty window is excluded from the terminal scan so it is never treated as
 	// a worktree terminal.
 	const excludeId = state.sidebarWindowId;
-	// A session's terminal may still be launching (openTerminal runs async and
-	// refresh fires on a timer). loadSessions() resets terminalState to "closed",
-	// so carry the previous in-memory "launching" flag forward until the window
-	// actually appears.
-	const prevLaunchingTerminals = new Set(
-		state.sessions.filter((s) => s.terminalState === "launching").map((s) => s.id),
+	// A window may still be launching (open* runs async and refresh fires on a
+	// timer). loadSessions() resets editorState to "closed", so carry the previous
+	// in-memory "launching" flag forward until the window actually appears.
+	const prevLaunching = new Set(
+		state.sessions.filter((s) => s.editorState === "launching").map((s) => s.id),
 	);
 	const [editorWindows, focusedEditor, terminalWindows, focusedTerminal] = await Promise.all([
 		listEditorWindows(),
@@ -176,40 +175,42 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 	]);
 
 	for (const session of sessions) {
-		const basename = session.worktreePath.split("/").pop() ?? "";
-		const hasWindow = editorWindows.some((w) => windowMatches(w, session.worktreePath, basename));
-		if (
-			hasWindow &&
-			focusedEditor.isFrontmost &&
-			windowMatches(focusedEditor.frontWindow, session.worktreePath, basename)
-		) {
-			session.editorState = "focused";
-		} else if (hasWindow) {
-			session.editorState = "open";
+		if (session.kind === "terminal") {
+			const hasTerminal = terminalWindows.some((w) =>
+				terminalMatchesWorktree(w, session.worktreePath),
+			);
+			if (
+				hasTerminal &&
+				focusedTerminal &&
+				terminalMatchesWorktree(
+					{ id: "", name: "", workingDirectory: focusedTerminal.workingDirectory },
+					session.worktreePath,
+				)
+			) {
+				session.editorState = "focused";
+			} else if (hasTerminal) {
+				session.editorState = "open";
+			} else if (prevLaunching.has(session.id)) {
+				session.editorState = "launching";
+			} else {
+				session.editorState = "closed";
+			}
 		} else {
-			session.editorState = "closed";
-		}
-
-		// Preserve the transient "launching" terminal state across refreshes until
-		// the window actually appears, so the spinner does not flicker.
-		const hasTerminal = terminalWindows.some((w) =>
-			terminalMatchesWorktree(w, session.worktreePath),
-		);
-		if (
-			hasTerminal &&
-			focusedTerminal &&
-			terminalMatchesWorktree(
-				{ id: "", name: "", workingDirectory: focusedTerminal.workingDirectory },
-				session.worktreePath,
-			)
-		) {
-			session.terminalState = "focused";
-		} else if (hasTerminal) {
-			session.terminalState = "open";
-		} else if (prevLaunchingTerminals.has(session.id)) {
-			session.terminalState = "launching";
-		} else {
-			session.terminalState = "closed";
+			const basename = session.worktreePath.split("/").pop() ?? "";
+			const hasWindow = editorWindows.some((w) => windowMatches(w, session.worktreePath, basename));
+			if (
+				hasWindow &&
+				focusedEditor.isFrontmost &&
+				windowMatches(focusedEditor.frontWindow, session.worktreePath, basename)
+			) {
+				session.editorState = "focused";
+			} else if (hasWindow) {
+				session.editorState = "open";
+			} else if (prevLaunching.has(session.id)) {
+				session.editorState = "launching";
+			} else {
+				session.editorState = "closed";
+			}
 		}
 	}
 
@@ -352,11 +353,14 @@ async function handleWizardInput(
 							filter: "",
 						};
 					} else if (wizard.selectedIndex === 2) {
-						// Open repository root
-						const repo = wizard.repo;
-						startPendingCreation(state, repo.name, repo.defaultBranch, "Opening editor...", () =>
-							createSessionFromPath(repo, repo.path, repo.defaultBranch, config.editor),
-						);
+						// Open repository root — choose editor vs terminal next.
+						state.wizard = {
+							step: "select-opener",
+							repo: wizard.repo,
+							selectedIndex: 0,
+							repos: wizard.repos,
+							action: { type: "root" },
+						};
 					}
 					break;
 				case "escape":
@@ -387,10 +391,14 @@ async function handleWizardInput(
 				case "enter": {
 					const selected = filtered[wizard.selectedIndex];
 					if (selected) {
-						const repo = wizard.repo;
-						startPendingCreation(state, repo.name, selected.branch, "Opening editor...", () =>
-							createSessionFromPath(repo, selected.path, selected.branch, config.editor),
-						);
+						// Existing worktree — choose editor vs terminal next.
+						state.wizard = {
+							step: "select-opener",
+							repo: wizard.repo,
+							selectedIndex: 0,
+							repos: wizard.repos,
+							action: { type: "existing", path: selected.path, branch: selected.branch },
+						};
 					}
 					break;
 				}
@@ -452,13 +460,18 @@ async function handleWizardInput(
 			switch (key.type) {
 				case "enter": {
 					if (wizard.branchName.trim()) {
-						const repo = wizard.repo;
-						const branch = wizard.branchName.trim();
-						const fetchBefore = wizard.fetchBeforeCreate;
-						const message = fetchBefore ? "Fetching origin..." : "Creating worktree...";
-						startPendingCreation(state, repo.name, branch, message, () =>
-							createSession(repo, branch, config.editor, fetchBefore),
-						);
+						// New worktree — choose editor vs terminal next.
+						state.wizard = {
+							step: "select-opener",
+							repo: wizard.repo,
+							selectedIndex: 0,
+							repos: wizard.repos,
+							action: {
+								type: "new-worktree",
+								branch: wizard.branchName.trim(),
+								fetchBefore: wizard.fetchBeforeCreate,
+							},
+						};
 					}
 					break;
 				}
@@ -476,6 +489,83 @@ async function handleWizardInput(
 				case "char":
 					wizard.branchName += key.char;
 					break;
+			}
+			break;
+		}
+		case "select-opener": {
+			switch (key.type) {
+				case "up":
+					wizard.selectedIndex = Math.max(0, wizard.selectedIndex - 1);
+					break;
+				case "down":
+					wizard.selectedIndex = Math.min(1, wizard.selectedIndex + 1);
+					break;
+				case "char":
+					if (key.char === "j") {
+						wizard.selectedIndex = Math.min(1, wizard.selectedIndex + 1);
+					} else if (key.char === "k") {
+						wizard.selectedIndex = Math.max(0, wizard.selectedIndex - 1);
+					}
+					break;
+				case "enter": {
+					const kind = wizard.selectedIndex === 0 ? "editor" : "terminal";
+					const repo = wizard.repo;
+					const action = wizard.action;
+					const editor = config.editor;
+					const excludeId = state.sidebarWindowId;
+					if (action.type === "root") {
+						const message = kind === "editor" ? "Opening editor..." : "Opening terminal...";
+						startPendingCreation(state, repo.name, repo.defaultBranch, message, () =>
+							createSessionFromPath(repo, repo.path, repo.defaultBranch, editor, kind, excludeId),
+						);
+					} else if (action.type === "existing") {
+						const message = kind === "editor" ? "Opening editor..." : "Opening terminal...";
+						startPendingCreation(state, repo.name, action.branch, message, () =>
+							createSessionFromPath(repo, action.path, action.branch, editor, kind, excludeId),
+						);
+					} else {
+						const message = action.fetchBefore
+							? "Fetching origin..."
+							: kind === "editor"
+								? "Opening editor..."
+								: "Opening terminal...";
+						startPendingCreation(state, repo.name, action.branch, message, () =>
+							createSession(repo, action.branch, editor, action.fetchBefore, kind, excludeId),
+						);
+					}
+					break;
+				}
+				case "escape": {
+					// Return to the step this opener choice was reached from.
+					const action = wizard.action;
+					if (action.type === "root") {
+						state.wizard = {
+							step: "select-mode",
+							repo: wizard.repo,
+							selectedIndex: 2,
+							repos: wizard.repos,
+						};
+					} else if (action.type === "existing") {
+						const worktrees = await listWorktrees(wizard.repo.path);
+						state.wizard = {
+							step: "select-worktree",
+							repo: wizard.repo,
+							worktrees,
+							selectedIndex: 0,
+							repos: wizard.repos,
+							filter: "",
+						};
+					} else {
+						state.wizard = {
+							step: "enter-branch",
+							repo: wizard.repo,
+							branchName: action.branch,
+							fetchBeforeCreate: action.fetchBefore,
+							repos: wizard.repos,
+						};
+					}
+					break;
+				}
 			}
 			break;
 		}
@@ -543,6 +633,8 @@ async function createSessionFromPath(
 	worktreePath: string,
 	branch: string,
 	editor: string,
+	kind: "editor" | "terminal",
+	sidebarWindowId: string | null,
 ): Promise<void> {
 	const sessionName = sessionNameFromBranch(branch);
 	const session = {
@@ -551,18 +643,23 @@ async function createSessionFromPath(
 		worktreePath,
 		branch,
 		repoName: repo.name,
+		kind,
 		agents: [],
 		editorState: "open" as const,
-		terminalState: "closed" as const,
 		createdAt: Date.now(),
 		lastActiveAt: Date.now(),
 	};
 	saveSession(session);
 	try {
-		await openEditor(worktreePath, editor);
+		if (kind === "terminal") {
+			await openTerminal(worktreePath, sidebarWindowId);
+		} else {
+			await openEditor(worktreePath, editor);
+		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : "Unknown error";
-		process.stderr.write(`\nError opening editor: ${msg}\n`);
+		const what = kind === "terminal" ? "terminal" : "editor";
+		process.stderr.write(`\nError opening ${what}: ${msg}\n`);
 	}
 }
 
@@ -571,12 +668,14 @@ async function createSession(
 	branchName: string,
 	editor: string,
 	fetchBeforeCreate: boolean,
+	kind: "editor" | "terminal",
+	sidebarWindowId: string | null,
 ): Promise<void> {
 	const worktreePath = await createWorktree(repo.path, branchName, {
 		fetch: fetchBeforeCreate,
 		base: repo.defaultBranch,
 	});
-	await createSessionFromPath(repo, worktreePath, branchName, editor);
+	await createSessionFromPath(repo, worktreePath, branchName, editor, kind, sidebarWindowId);
 }
 
 async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Promise<void> {
@@ -596,6 +695,7 @@ async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Prom
 			const { sessionId, worktreePath, selectedIndex } = confirm;
 			const removeWorktreeToo = selectedIndex === 1;
 			const excludeId = state.sidebarWindowId;
+			const kind = state.sessions.find((s) => s.id === sessionId)?.kind ?? "editor";
 			// Close the confirm modal immediately and mark the card as deleting
 			state.deleteConfirm = null;
 			state.deletingSessionIds.add(sessionId);
@@ -604,10 +704,11 @@ async function handleDeleteConfirmInput(state: SidebarState, data: Buffer): Prom
 			// Perform the actual deletion asynchronously so the spinner stays responsive
 			void (async () => {
 				try {
-					await Promise.all([
-						closeEditorWindow(worktreePath),
-						closeTerminalWindow(worktreePath, excludeId),
-					]);
+					if (kind === "terminal") {
+						await closeTerminalWindow(worktreePath, excludeId);
+					} else {
+						await closeEditorWindow(worktreePath);
+					}
 					deleteSession(sessionId);
 
 					if (removeWorktreeToo) {
@@ -682,19 +783,26 @@ async function handleWindowOpenConfirmInput(state: SidebarState, data: Buffer): 
 
 	switch (key.type) {
 		case "enter": {
-			const { sessionId, worktreePath } = confirm;
+			const { sessionId, worktreePath, kind } = confirm;
 			state.windowOpenConfirm = null;
 			render(state);
 
 			void (async () => {
-				const focused = await focusEditor(worktreePath, state.editor, state.sidebarWindowId);
+				const focused =
+					kind === "terminal"
+						? await focusTerminalWindow(worktreePath, state.sidebarWindowId)
+						: await focusEditor(worktreePath, state.editor, state.sidebarWindowId);
 				if (!focused) {
 					const session = state.sessions.find((s) => s.id === sessionId);
 					if (session) {
 						session.editorState = "launching";
 						render(state);
 					}
-					await openEditor(worktreePath, state.editor, state.sidebarWindowId);
+					if (kind === "terminal") {
+						await openTerminal(worktreePath, state.sidebarWindowId);
+					} else {
+						await openEditor(worktreePath, state.editor, state.sidebarWindowId);
+					}
 					if (session) session.editorState = "open";
 				}
 				render(state);
@@ -709,13 +817,13 @@ async function handleWindowOpenConfirmInput(state: SidebarState, data: Buffer): 
 
 function getManagedWindows(sessions: SidebarState["sessions"]): { worktreePath: string }[] {
 	return sessions
-		.filter((s) => s.editorState !== "closed")
+		.filter((s) => s.kind === "editor" && s.editorState !== "closed")
 		.map((s) => ({ worktreePath: s.worktreePath }));
 }
 
 function getManagedTerminals(sessions: SidebarState["sessions"]): { worktreePath: string }[] {
 	return sessions
-		.filter((s) => s.terminalState !== "closed")
+		.filter((s) => s.kind === "terminal" && s.editorState !== "closed")
 		.map((s) => ({ worktreePath: s.worktreePath }));
 }
 
@@ -754,7 +862,6 @@ export async function runSidebar(): Promise<void> {
 		const hasAnimated = state.sessions.some(
 			(s) =>
 				s.editorState === "launching" ||
-				s.terminalState === "launching" ||
 				s.agents.some((a) => a.status === "running" || a.status === "waiting"),
 		);
 		if (
@@ -802,12 +909,13 @@ export async function runSidebar(): Promise<void> {
 					break;
 				case "enter":
 					if (state.quitConfirm.selectedIndex === 1) {
-						// Close VS Code + Ghostty windows for all managed sessions
+						// Close the managed window (editor or terminal) for every session.
 						for (const session of state.sessions) {
-							await Promise.all([
-								closeEditorWindow(session.worktreePath),
-								closeTerminalWindow(session.worktreePath, state.sidebarWindowId),
-							]);
+							if (session.kind === "terminal") {
+								await closeTerminalWindow(session.worktreePath, state.sidebarWindowId);
+							} else {
+								await closeEditorWindow(session.worktreePath);
+							}
 						}
 					}
 					cleanup();
@@ -868,16 +976,19 @@ export async function runSidebar(): Promise<void> {
 			case "tab": {
 				const session = state.sessions[state.selectedIndex];
 				if (session && !state.deletingSessionIds.has(session.id)) {
-					const focused = await focusEditor(
-						session.worktreePath,
-						config.editor,
-						state.sidebarWindowId,
-					);
+					const focused =
+						session.kind === "terminal"
+							? await focusTerminalWindow(session.worktreePath, state.sidebarWindowId)
+							: await focusEditor(session.worktreePath, config.editor, state.sidebarWindowId);
 					if (!focused) {
-						// Show launching state while VS Code opens
+						// Show launching state while the window opens.
 						session.editorState = "launching";
 						render(state);
-						await openEditor(session.worktreePath, config.editor, state.sidebarWindowId);
+						if (session.kind === "terminal") {
+							await openTerminal(session.worktreePath, state.sidebarWindowId);
+						} else {
+							await openEditor(session.worktreePath, config.editor, state.sidebarWindowId);
+						}
 						session.editorState = "open";
 					}
 				}
@@ -937,44 +1048,7 @@ export async function runSidebar(): Promise<void> {
 					state.windowCloseConfirm = {
 						sessionId: session.id,
 						worktreePath: session.worktreePath,
-						target: "editor",
-					};
-				}
-				break;
-			}
-
-			case "terminal_open": {
-				const session = state.sessions[state.selectedIndex];
-				if (session && !state.deletingSessionIds.has(session.id)) {
-					const focused = await focusTerminalWindow(session.worktreePath, state.sidebarWindowId);
-					if (!focused) {
-						// Show launching state while Ghostty opens; run async so the
-						// spinner keeps animating and input stays responsive.
-						session.terminalState = "launching";
-						render(state);
-						const worktreePath = session.worktreePath;
-						const excludeId = state.sidebarWindowId;
-						void (async () => {
-							await openTerminal(worktreePath, excludeId);
-							await refreshSessions(state);
-							render(state);
-						})();
-					}
-				}
-				break;
-			}
-
-			case "terminal_close": {
-				const session = state.sessions[state.selectedIndex];
-				if (
-					session &&
-					!state.deletingSessionIds.has(session.id) &&
-					session.terminalState !== "closed"
-				) {
-					state.windowCloseConfirm = {
-						sessionId: session.id,
-						worktreePath: session.worktreePath,
-						target: "terminal",
+						target: session.kind,
 					};
 				}
 				break;
@@ -988,12 +1062,34 @@ export async function runSidebar(): Promise<void> {
 					state.selectedIndex = clicked.sessionIndex;
 					const session = state.sessions[clicked.sessionIndex];
 					if (session && !state.deletingSessionIds.has(session.id)) {
-						// Clicks are easy to fire by accident, so confirm before
-						// focusing/opening the editor window (Enter stays direct).
-						state.windowOpenConfirm = {
-							sessionId: session.id,
-							worktreePath: session.worktreePath,
-						};
+						const isOpen =
+							session.editorState === "open" ||
+							session.editorState === "focused" ||
+							session.editorState === "launching";
+						if (isOpen) {
+							// Window is believed open: focus it directly, no confirm.
+							const focused =
+								session.kind === "terminal"
+									? await focusTerminalWindow(session.worktreePath, state.sidebarWindowId)
+									: await focusEditor(session.worktreePath, config.editor, state.sidebarWindowId);
+							// If focus failed the window actually vanished — fall back to the
+							// open confirmation instead of silently launching a new one.
+							if (!focused) {
+								state.windowOpenConfirm = {
+									sessionId: session.id,
+									worktreePath: session.worktreePath,
+									kind: session.kind,
+								};
+							}
+						} else {
+							// Window is closed: clicks are easy to fire by accident, so
+							// confirm before opening (Enter stays direct).
+							state.windowOpenConfirm = {
+								sessionId: session.id,
+								worktreePath: session.worktreePath,
+								kind: session.kind,
+							};
+						}
 					}
 				}
 				break;

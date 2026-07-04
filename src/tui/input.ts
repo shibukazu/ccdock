@@ -10,8 +10,6 @@ export type KeyAction =
 	| { type: "log" }
 	| { type: "realign" }
 	| { type: "window_close" }
-	| { type: "terminal_open" }
-	| { type: "terminal_close" }
 	| { type: "mouse_click"; row: number; col: number }
 	| { type: "unknown" };
 
@@ -93,14 +91,8 @@ export function parseKey(data: Buffer): KeyAction {
 	// Realign VS Code windows: r
 	if (s === "r") return { type: "realign" };
 
-	// Close VS Code window for the selected session (keep session/worktree): w
+	// Close the managed window (editor or terminal) for the selected session: w
 	if (s === "w") return { type: "window_close" };
-
-	// Open / focus the worktree terminal (Ghostty): t
-	if (s === "t") return { type: "terminal_open" };
-
-	// Close the worktree terminal window (keep session/worktree): W (Shift+W)
-	if (s === "W") return { type: "terminal_close" };
 
 	return { type: "unknown" };
 }

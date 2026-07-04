@@ -235,6 +235,39 @@ function renderFetchChoice(repo: RepoInfo, selectedIndex: number, cols: number):
 	return lines;
 }
 
+function renderOpenerSelect(repo: RepoInfo, selectedIndex: number, cols: number): string[] {
+	const lines: string[] = [];
+	const width = Math.max(cols - 4, 20);
+
+	lines.push(`${BOLD}${COLORS.highlight} Create Session: ${repo.name}${RESET}`);
+	lines.push("");
+	lines.push(`${COLORS.muted}  Open with:${RESET}`);
+	lines.push("");
+
+	const options = [
+		{ label: "Editor (VS Code)", desc: "Open a VS Code window" },
+		{ label: "Terminal (Ghostty)", desc: "Open a Ghostty terminal" },
+	];
+
+	for (let i = 0; i < options.length; i++) {
+		const opt = options[i];
+		if (!opt) continue;
+		const isSelected = i === selectedIndex;
+		const marker = isSelected ? `${COLORS.highlight}\u25b6${RESET}` : " ";
+		const label = isSelected
+			? `${BOLD}${COLORS.title}${opt.label}${RESET}`
+			: `${COLORS.subtitle}${opt.label}${RESET}`;
+		const desc = `${COLORS.muted}${opt.desc}${RESET}`;
+		lines.push(truncate(` ${marker} ${label}`, width));
+		lines.push(truncate(`     ${desc}`, width));
+	}
+
+	lines.push("");
+	lines.push(`${COLORS.muted}  j/k: navigate | Enter: select | Esc: back${RESET}`);
+
+	return lines;
+}
+
 export function renderWizard(
 	wizard: WizardState,
 	cols: number,
@@ -270,6 +303,9 @@ export function renderWizard(
 			break;
 		case "enter-branch":
 			content = renderBranchInput(wizard.repo, wizard.branchName, wizard.fetchBeforeCreate, cols);
+			break;
+		case "select-opener":
+			content = renderOpenerSelect(wizard.repo, wizard.selectedIndex, cols);
 			break;
 	}
 

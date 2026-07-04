@@ -24,7 +24,7 @@ ccdock sits in a narrow terminal sidebar and takes care of the rest: auto-positi
 
 ## Features
 
-- **VS Code orchestration** — Auto-open, position, and switch VS Code (or Cursor) windows next to the sidebar. Click a session and confirm, and the right editor snaps into focus (the confirmation guards against accidental clicks).
+- **VS Code + terminal orchestration** — Auto-open, position, and switch VS Code (or Cursor) windows and Ghostty terminals next to the sidebar. Each session manages a single window; pick "Editor" or "Terminal" when creating it. Clicking a session whose window is open snaps it straight into focus; clicking one whose window is closed asks for confirmation first (guarding against accidental opens).
 - **Real-time agent monitoring** — See exactly what each Claude Code agent is doing: which tool it's calling, what file it's reading, what command it's running.
 - **Git worktree management** — Create, switch, and delete worktrees via [git-wt](https://github.com/k1LoW/git-wt) integration. Each worktree gets its own session.
 - **Activity log** — Live feed of tool invocations with session numbers (#N) across all active agents.
@@ -77,7 +77,7 @@ Edit `~/.config/ccdock/config.json` (auto-created on first run):
 | -------------------------- | ------------------------------------------------------------------------------------ |
 | `workspace_dirs`           | Directories to scan for git repositories                                             |
 | `editor`                   | Editor command: `"code"` for VS Code, `"cursor"` for Cursor                          |
-| `terminal`                 | Work-terminal app for the `t` keybinding. Only `"ghostty"` is supported today         |
+| `terminal`                 | Terminal app for terminal sessions. Only `"ghostty"` is supported today              |
 | `sound.enabled`            | Play a sound when an agent surfaces a `PermissionRequest` / `Notification`           |
 | `sound.permission_request` | Sound file (afplay-compatible) for permission prompts                                |
 | `sound.notification`       | Sound file for general notifications                                                 |
@@ -171,37 +171,41 @@ ccdock help     # show help
 
 ### Keybindings
 
-| Key          | Action                                  |
-| ------------ | --------------------------------------- |
-| `j` / `k`   | Navigate between sessions               |
-| `Enter`      | Focus editor window for selected session |
-| `Tab`        | Focus editor window (same as Enter)     |
-| `n`          | Create new session (interactive wizard) |
-| `d`          | Delete session                          |
-| `t`          | Open / focus the worktree terminal (Ghostty) |
-| `w`          | Close editor window (with confirmation) |
-| `W`          | Close terminal window (with confirmation) |
-| `r`          | Realign all editor + terminal windows   |
-| `c`          | Toggle compact mode                     |
-| `l`          | Toggle activity log                     |
-| `q` / Ctrl+C | Quit (with option to close editors)    |
-| Mouse click  | Select session                          |
-| Scroll wheel | Navigate between sessions               |
+| Key          | Action                                          |
+| ------------ | ----------------------------------------------- |
+| `j` / `k`   | Navigate between sessions                        |
+| `Enter`      | Focus the session's window (editor or terminal)  |
+| `Tab`        | Focus the session's window (same as Enter)       |
+| `n`          | Create new session (interactive wizard)          |
+| `d`          | Delete session                                   |
+| `w`          | Close the session's window (with confirmation)   |
+| `r`          | Realign all editor + terminal windows            |
+| `c`          | Toggle compact mode                              |
+| `l`          | Toggle activity log                              |
+| `q` / Ctrl+C | Quit (with option to close windows)             |
+| Mouse click  | Focus the window if open, else confirm to open   |
+| Scroll wheel | Navigate between sessions                         |
 
 ### Session card states
 
+Each card manages one window — a VS Code editor or a Ghostty terminal, chosen in the wizard. Terminal cards carry a dim ` terminal` label after the repo:branch name; the border and spinner reflect that card's own window state.
+
 | Card appearance | Meaning |
 | --------------- | ------- |
-| White border | Editor or terminal is focused |
-| Normal border | Editor or terminal is open but not focused |
-| Spinning `⠋` indicator | Editor is launching |
-| Spinning `⠋T` badge | Terminal is launching |
-| Teal `●T` badge | Terminal is open (white when focused) |
-| Dim border, no badge | Editor and terminal both closed |
+| White border | The card's window is focused |
+| Normal border | The card's window is open but not focused |
+| Spinning `⠋` indicator | The card's window is launching |
+| Dim border | The card's window is closed |
 
-### Terminal windows
+### Editor vs terminal sessions
 
-Pressing `t` opens (or focuses) a [Ghostty](https://ghostty.org/) terminal whose working directory is the selected session's worktree, and manages it next to the sidebar just like an editor window (position, focus, close, realign). Terminals are matched to worktrees by the shell's working directory, so same-named branches across different repositories never collide.
+When you create a session (`n`), the final wizard step — **Open with** — asks whether to open an **Editor (VS Code)** or a **Terminal (Ghostty)**. This applies to all three creation paths: new worktree, existing worktree, and repository root.
+
+- **Editor sessions** open (or focus) a VS Code/Cursor window for the worktree.
+- **Terminal sessions** open (or focus) a [Ghostty](https://ghostty.org/) terminal whose working directory is the worktree, managed next to the sidebar just like an editor (position, focus, close, realign).
+- The same worktree can have both an editor card and a terminal card; each manages its own window independently. Agent status is shown on every card for that worktree.
+
+Terminals are matched to worktrees by the shell's working directory, so same-named branches across different repositories never collide.
 
 - The first time ccdock scripts Ghostty, macOS shows an **Automation** permission prompt ("ccdock wants to control Ghostty"). Approve it (also under System Settings → Privacy & Security → Automation) so terminal management works.
 - ccdock captures its own Ghostty window at startup and never closes or repositions it — only worktree terminals are managed.
@@ -233,7 +237,7 @@ ccdock sidebar (polls every 2s) <----------+
 - **State** — `~/.local/state/ccdock/` stores session and agent state as JSON files
 - **Hooks** — `ccdock hook` writes agent state files when Claude Code fires events
 - **Window management** — AppleScript via `osascript` to position VS Code next to the sidebar
-- **Wizard** — `n` key scans workspace dirs, offers create/existing/root worktree options via `git wt`
+- **Wizard** — `n` key scans workspace dirs, offers create/existing/root worktree options via `git wt`, then an "Open with" step to pick editor or terminal
 
 ### File structure
 

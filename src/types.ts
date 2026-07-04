@@ -31,9 +31,11 @@ export interface WorkspaceSession {
 	worktreePath: string;
 	branch: string;
 	repoName: string; // extracted from path
+	/** Which window this card manages: an editor (VS Code) or a terminal (Ghostty). */
+	kind: "editor" | "terminal";
 	agents: AgentState[]; // populated from state files
-	editorState: EditorState; // VS Code window state
-	terminalState: EditorState; // Ghostty terminal window state (reuses EditorState)
+	/** State of this card's managed window (VS Code or Ghostty depending on `kind`). */
+	editorState: EditorState;
 	createdAt: number;
 	lastActiveAt: number;
 }
@@ -72,10 +74,12 @@ export interface WindowCloseConfirm {
 	target: "editor" | "terminal";
 }
 
-/** Confirmation before a mouse click focuses/opens an editor window (guards accidental clicks). */
+/** Confirmation before a mouse click opens a closed window (guards accidental clicks). */
 export interface WindowOpenConfirm {
 	sessionId: string;
 	worktreePath: string;
+	/** Which window to open, so the modal text and open action match the card's kind. */
+	kind: "editor" | "terminal";
 }
 
 export interface SidebarState {
@@ -119,6 +123,15 @@ export interface SidebarState {
 	sidebarWindowId: string | null;
 }
 
+/**
+ * Fully-resolved creation intent chosen before the final "Open with" step, so
+ * the select-opener handler only needs the kind plus this payload to act.
+ */
+export type PendingOpenAction =
+	| { type: "new-worktree"; branch: string; fetchBefore: boolean }
+	| { type: "existing"; path: string; branch: string }
+	| { type: "root" };
+
 // Wizard steps for creating new sessions
 export type WizardStep =
 	| { step: "select-repo"; repos: RepoInfo[]; selectedIndex: number; filter: string }
@@ -138,6 +151,13 @@ export type WizardStep =
 			branchName: string;
 			fetchBeforeCreate: boolean;
 			repos: RepoInfo[];
+	  }
+	| {
+			step: "select-opener";
+			repo: RepoInfo;
+			selectedIndex: number;
+			repos: RepoInfo[];
+			action: PendingOpenAction;
 	  };
 
 export type WizardState = WizardStep | null;

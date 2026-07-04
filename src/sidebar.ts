@@ -72,6 +72,11 @@ function createInitialState(editor: HubConfig["editor"]): SidebarState {
 const DIFF_TTL_MS = 8000;
 const diffCache = new Map<string, { at: number; diff: WorktreeDiff | null }>();
 
+// Sessions whose window is still being opened by createSessionFromPath. The
+// session JSON is saved before the window exists, so the refresh loop shows
+// these as "launching" instead of flickering to "closed".
+const openingSessionIds = new Set<string>();
+
 // Refresh diffs for sessions whose managed window is not closed, honoring the
 // per-worktree TTL. Fetches run concurrently. The resulting snapshot is stored
 // on state.worktreeDiffs for the renderer to read; the cache itself is
@@ -167,6 +172,7 @@ async function refreshSessions(state: SidebarState): Promise<void> {
 	const prevLaunching = new Set(
 		state.sessions.filter((s) => s.editorState === "launching").map((s) => s.id),
 	);
+	for (const id of openingSessionIds) prevLaunching.add(id);
 	const [editorWindows, focusedEditor, terminalWindows, focusedTerminal] = await Promise.all([
 		listEditorWindows(),
 		getFocusedEditorWindow(),
@@ -650,6 +656,7 @@ async function createSessionFromPath(
 		lastActiveAt: Date.now(),
 	};
 	saveSession(session);
+	openingSessionIds.add(session.id);
 	try {
 		if (kind === "terminal") {
 			await openTerminal(worktreePath, sidebarWindowId);
@@ -660,6 +667,8 @@ async function createSessionFromPath(
 		const msg = err instanceof Error ? err.message : "Unknown error";
 		const what = kind === "terminal" ? "terminal" : "editor";
 		process.stderr.write(`\nError opening ${what}: ${msg}\n`);
+	} finally {
+		openingSessionIds.delete(session.id);
 	}
 }
 
@@ -831,11 +840,15 @@ export async function runSidebar(): Promise<void> {
 	const config = loadConfig();
 	const state = createInitialState(config.editor);
 
-	// Capture the id of ccdock's own Ghostty window once, before any worktree
-	// terminals are opened. Every terminal list/close/reposition/focus operation
-	// excludes this id so the sidebar never closes or moves itself. Null when
-	// ccdock is not running inside Ghostty.
-	state.sidebarWindowId = await getSidebarGhosttyWindowId();
+	// Tag our own terminal with a unique title, then resolve the sidebar's
+	// Ghostty window id from it. Every terminal list/close/reposition/focus
+	// operation excludes this id so the sidebar never closes or moves itself.
+	// Title-based lookup stays correct even when ccdock is restarted while a
+	// worktree terminal is frontmost (front-window guessing does not).
+	const sidebarTitle = `ccdock [${process.pid}]`;
+	process.stdout.write(`\x1b]2;${sidebarTitle}\x07`);
+	await Bun.sleep(250);
+	state.sidebarWindowId = await getSidebarGhosttyWindowId(sidebarTitle);
 
 	// Initial load
 	await refreshSessions(state);

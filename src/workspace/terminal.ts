@@ -64,12 +64,18 @@ export function terminalMatchesWorktree(win: TerminalWindow, worktreePath: strin
 }
 
 /**
- * Capture the Ghostty window id of ccdock's own terminal. Call once at startup,
- * before any worktree terminals are opened, so the front window is the sidebar.
- * Returns null when ccdock is not running inside Ghostty.
+ * Capture the Ghostty window id of ccdock's own terminal. Call once at startup.
+ * When `sidebarTitle` is given (a unique title the sidebar set on its own
+ * terminal via OSC), the window is resolved by that title — reliable even when
+ * ccdock is restarted while another Ghostty window is frontmost. Falls back to
+ * the front window. Returns null when ccdock is not running inside Ghostty.
  */
-export async function getSidebarGhosttyWindowId(): Promise<string | null> {
+export async function getSidebarGhosttyWindowId(sidebarTitle?: string): Promise<string | null> {
 	if (!(await isTerminalRunning())) return null;
+	if (sidebarTitle) {
+		const byTitle = (await listTerminalWindows(null)).find((w) => w.name === sidebarTitle);
+		if (byTitle) return byTitle.id;
+	}
 	try {
 		const result = await runOsascript(`
 tell application "Ghostty"
@@ -196,15 +202,20 @@ async function positionTerminalWindow(windowName: string, sidebar: WindowBounds)
 	const { x, y, width, height } = await computeLayout(sidebar);
 	try {
 		const escapedName = escapeAppleScriptString(windowName);
+		// Apply twice: Ghostty may clamp the requested size against the window's
+		// pre-move geometry, so a second pass after it settles fixes the width.
 		await runOsascript(`
 tell application "System Events"
 	tell process "ghostty"
-		repeat with w in every window
-			if name of w is "${escapedName}" then
-				set position of w to {${x}, ${y}}
-				set size of w to {${width}, ${height}}
-				exit repeat
-			end if
+		repeat 2 times
+			repeat with w in every window
+				if name of w is "${escapedName}" then
+					set position of w to {${x}, ${y}}
+					set size of w to {${width}, ${height}}
+					exit repeat
+				end if
+			end repeat
+			delay 0.2
 		end repeat
 	end tell
 end tell

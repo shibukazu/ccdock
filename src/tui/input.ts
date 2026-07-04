@@ -10,6 +10,7 @@ export type KeyAction =
 	| { type: "log" }
 	| { type: "realign" }
 	| { type: "window_close" }
+	| { type: "terminal_open" }
 	| { type: "mouse_click"; row: number; col: number }
 	| { type: "unknown" };
 
@@ -93,6 +94,9 @@ export function parseKey(data: Buffer): KeyAction {
 
 	// Close the managed window (editor or terminal) for the selected session: w
 	if (s === "w") return { type: "window_close" };
+
+	// Open a scratch Ghostty terminal at the workspace root: t
+	if (s === "t") return { type: "terminal_open" };
 
 	return { type: "unknown" };
 }

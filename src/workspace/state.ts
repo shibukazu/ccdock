@@ -63,8 +63,6 @@ export function loadSessions(): WorkspaceSession[] {
 			const parsed = JSON.parse(raw) as WorkspaceSession;
 			parsed.agents = [];
 			parsed.editorState = parsed.editorState ?? "closed";
-			// Back-compat: sessions created before the kind field default to editor.
-			parsed.kind = parsed.kind ?? "editor";
 			sessions.push(parsed);
 		} catch {
 			// Skip malformed files

@@ -32,10 +32,11 @@ describe("parseKey (sidebar)", () => {
 		expect(parseKey(Buffer.from("l"))).toEqual({ type: "log" });
 		expect(parseKey(Buffer.from("r"))).toEqual({ type: "realign" });
 		expect(parseKey(Buffer.from("w"))).toEqual({ type: "window_close" });
+		expect(parseKey(Buffer.from("t"))).toEqual({ type: "terminal_open" });
 	});
 
-	test("retired terminal shortcuts no longer bind", () => {
-		expect(parseKey(Buffer.from("t"))).toEqual({ type: "unknown" });
+	test("t opens a scratch terminal, W is unbound", () => {
+		expect(parseKey(Buffer.from("t"))).toEqual({ type: "terminal_open" });
 		expect(parseKey(Buffer.from("W"))).toEqual({ type: "unknown" });
 	});
 

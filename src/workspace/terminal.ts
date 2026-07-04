@@ -1,35 +1,12 @@
 /**
- * macOS Ghostty terminal window management via AppleScript / System Events.
- *
- * Ghostty terminal identity:
- *   Ghostty's AppleScript dictionary exposes application -> window -> tab ->
- *   terminal, and each terminal reports its `working directory`. We resolve a
- *   worktree's terminal window by the working directory of the focused terminal
- *   of its selected tab, so the match is robust across same-named branches in
- *   different repositories (the cwd is the full worktree path).
- *
- * Two window-id systems coexist and are bridged by the window title (name):
- *   - Scripting side (`tell application "Ghostty"`): window `id` like
- *     "tab-group-a65e59360", used for activate/close and cwd lookups.
- *   - System Events side (`tell process "ghostty"`, lowercase): AX windows used
- *     for set position / set size, matched to scripting windows by `name`.
- *
- * The sidebar's own Ghostty window (ccdock itself runs inside Ghostty) is always
- * excluded via the caller-supplied excludeId so ccdock never closes or moves
- * itself.
+ * macOS Ghostty integration, scoped to two purposes:
+ *   1. Resolving the sidebar's own Ghostty window (self-identification via an
+ *      OSC-set title), so window.ts can position itself reliably.
+ *   2. Opening a scratch, unmanaged Ghostty window on demand (`t` key).
+ * ccdock does not track, position, or close any other Ghostty window.
  */
 
 import { escapeAppleScriptString, runOsascript } from "./applescript.ts";
-// Deferred (function-body) usage only, so the window.ts <-> terminal.ts
-// import cycle is safe at module-initialization time.
-import { getScreenRightEdge, getSidebarBounds } from "./window.ts";
-
-interface WindowBounds {
-	x: number;
-	y: number;
-	width: number;
-	height: number;
-}
 
 export interface TerminalWindow {
 	/** Scripting-side stable window id (e.g. "tab-group-a65e59360"). */
@@ -51,16 +28,6 @@ async function isTerminalRunning(): Promise<boolean> {
 	} catch {
 		return false;
 	}
-}
-
-/**
- * True when the terminal's working directory equals the worktree root or lies
- * inside it (prefix match with a path-separator boundary).
- */
-export function terminalMatchesWorktree(win: TerminalWindow, worktreePath: string): boolean {
-	if (!win.workingDirectory || !worktreePath) return false;
-	const root = worktreePath.endsWith("/") ? worktreePath : `${worktreePath}/`;
-	return win.workingDirectory === worktreePath || win.workingDirectory.startsWith(root);
 }
 
 /**
@@ -144,14 +111,6 @@ return joined
 	}
 }
 
-async function findMatchingWindow(
-	worktreePath: string,
-	excludeId: string | null,
-): Promise<TerminalWindow | null> {
-	const windows = await listTerminalWindows(excludeId);
-	return windows.find((w) => terminalMatchesWorktree(w, worktreePath)) ?? null;
-}
-
 /**
  * Resolve the current title of a Ghostty window given its scripting-side id.
  * Titles change as the user navigates, so we look this up at call time rather
@@ -177,61 +136,12 @@ end tell
 }
 
 /**
- * Compute the region to the right of the sidebar. Mirrors the editor layout so
- * terminals and editors share the same target rectangle.
+ * Open a brand-new, unmanaged Ghostty window at `dir`. Fire-and-forget: no
+ * polling, no tracking, no positioning. The window is entirely the user's
+ * responsibility once opened.
  */
-async function computeLayout(sidebar: WindowBounds): Promise<{
-	x: number;
-	y: number;
-	width: number;
-	height: number;
-}> {
-	const x = sidebar.x + sidebar.width + 4; // 4px gap
-	const y = sidebar.y;
-	const screenRight = await getScreenRightEdge(sidebar);
-	const width = Math.max(screenRight - x, 400);
-	const height = sidebar.height;
-	return { x, y, width, height };
-}
-
-/**
- * Position a Ghostty window (by title) to fill the area right of the sidebar.
- */
-async function positionTerminalWindow(windowName: string, sidebar: WindowBounds): Promise<void> {
-	if (!windowName) return;
-	const { x, y, width, height } = await computeLayout(sidebar);
-	try {
-		const escapedName = escapeAppleScriptString(windowName);
-		// Apply twice: Ghostty may clamp the requested size against the window's
-		// pre-move geometry, so a second pass after it settles fixes the width.
-		await runOsascript(`
-tell application "System Events"
-	tell process "ghostty"
-		repeat 2 times
-			repeat with w in every window
-				if name of w is "${escapedName}" then
-					set position of w to {${x}, ${y}}
-					set size of w to {${width}, ${height}}
-					exit repeat
-				end if
-			end repeat
-			delay 0.2
-		end repeat
-	end tell
-end tell
-`);
-	} catch {
-		// Window not found or not positionable
-	}
-}
-
-/**
- * Open a new Ghostty terminal in the worktree directory, wait for it to appear,
- * then position it next to the sidebar. The sidebar window (excludeId) is
- * skipped when locating the freshly opened window.
- */
-export async function openTerminal(worktreePath: string, excludeId: string | null): Promise<void> {
-	const escapedPath = escapeAppleScriptString(worktreePath);
+export async function openScratchTerminal(dir: string): Promise<void> {
+	const escapedPath = escapeAppleScriptString(dir);
 	try {
 		await runOsascript(`
 tell application "Ghostty"
@@ -241,170 +151,5 @@ end tell
 `);
 	} catch {
 		// Ghostty unavailable
-		return;
-	}
-
-	// Wait for the new window to appear (up to ~10s).
-	let match: TerminalWindow | null = null;
-	for (let i = 0; i < 20; i++) {
-		await Bun.sleep(500);
-		match = await findMatchingWindow(worktreePath, excludeId);
-		if (match) break;
-	}
-
-	const sidebar = await getSidebarBounds(excludeId);
-	if (sidebar && match) {
-		await positionTerminalWindow(match.name, sidebar);
-	}
-}
-
-/**
- * Bring the worktree's Ghostty window to front and position it next to the
- * sidebar. Returns false when no matching window exists.
- */
-export async function focusTerminalWindow(
-	worktreePath: string,
-	excludeId: string | null,
-): Promise<boolean> {
-	const match = await findMatchingWindow(worktreePath, excludeId);
-	if (!match) return false;
-	try {
-		const escapedId = escapeAppleScriptString(match.id);
-		// Same specifier-parsing caveat as `close window`: resolve a reference
-		// first instead of the inline `activate window id "..."` form.
-		await runOsascript(`
-tell application "Ghostty"
-	activate
-	repeat with w in windows
-		if (id of w) as string is "${escapedId}" then
-			activate window (contents of w)
-			exit repeat
-		end if
-	end repeat
-end tell
-`);
-	} catch {
-		return false;
-	}
-	const sidebar = await getSidebarBounds(excludeId);
-	if (sidebar) {
-		await positionTerminalWindow(match.name, sidebar);
-	}
-	return true;
-}
-
-/**
- * Close the worktree's Ghostty window (keeping the session and worktree).
- */
-export async function closeTerminalWindow(
-	worktreePath: string,
-	excludeId: string | null,
-): Promise<void> {
-	const match = await findMatchingWindow(worktreePath, excludeId);
-	if (!match) return;
-	try {
-		const escapedId = escapeAppleScriptString(match.id);
-		// Ghostty's custom `close window` command takes a window specifier; the
-		// inline `close window id "..."` form fails to parse, so resolve a
-		// reference first.
-		await runOsascript(`
-tell application "Ghostty"
-	repeat with w in windows
-		if (id of w) as string is "${escapedId}" then
-			close window (contents of w)
-			exit repeat
-		end if
-	end repeat
-end tell
-`);
-	} catch {
-		// Already closed
-	}
-}
-
-/**
- * Return the working directory of the currently selected Ghostty window when
- * Ghostty is frontmost, excluding the sidebar's own window. Used to mark a
- * session's terminal as "focused".
- */
-export async function getFocusedTerminalWindow(
-	excludeId: string | null,
-): Promise<{ workingDirectory: string } | null> {
-	if (!(await isTerminalRunning())) return null;
-	try {
-		const excluded = escapeAppleScriptString(excludeId ?? "");
-		const result = await runOsascript(`
-set isFront to false
-tell application "System Events"
-	try
-		set isFront to (frontmost of process "ghostty")
-	end try
-end tell
-if isFront is false then return ""
-tell application "Ghostty"
-	try
-		set w to front window
-		if (id of w as string) is "${excluded}" then return ""
-		return (working directory of (focused terminal of (selected tab of w))) as string
-	on error
-		return ""
-	end try
-end tell
-`);
-		return result.length > 0 ? { workingDirectory: result } : null;
-	} catch {
-		return null;
-	}
-}
-
-export interface ManagedTerminal {
-	worktreePath: string;
-}
-
-/**
- * Reposition all managed Ghostty windows to fill the area right of the sidebar,
- * excluding the sidebar's own window.
- */
-export async function repositionAllTerminals(
-	managed: ManagedTerminal[],
-	excludeId: string | null,
-): Promise<void> {
-	if (managed.length === 0) return;
-	if (!(await isTerminalRunning())) return;
-	const sidebar = await getSidebarBounds(excludeId);
-	if (!sidebar) return;
-
-	const windows = await listTerminalWindows(excludeId);
-	const targets = windows.filter((w) =>
-		managed.some((m) => terminalMatchesWorktree(w, m.worktreePath)),
-	);
-	if (targets.length === 0) return;
-
-	const { x, y, width, height } = await computeLayout(sidebar);
-	const namesAppleScript = targets.map((w) => `"${escapeAppleScriptString(w.name)}"`).join(", ");
-	try {
-		await runOsascript(`
-tell application "System Events"
-	tell process "ghostty"
-		set managedNames to {${namesAppleScript}}
-		repeat with w in every window
-			set wName to name of w
-			set isManaged to false
-			repeat with t in managedNames
-				if wName is (t as text) then
-					set isManaged to true
-					exit repeat
-				end if
-			end repeat
-			if isManaged then
-				set position of w to {${x}, ${y}}
-				set size of w to {${width}, ${height}}
-			end if
-		end repeat
-	end tell
-end tell
-`);
-	} catch {
-		// No windows to position
 	}
 }

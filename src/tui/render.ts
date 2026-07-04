@@ -89,26 +89,20 @@ function renderDeleteConfirm(deleteConfirm: DeleteConfirm): string[] {
 	return lines;
 }
 
-function renderWindowCloseConfirm(target: WindowCloseConfirm["target"]): string[] {
+function renderWindowCloseConfirm(): string[] {
 	const lines: string[] = [];
-
-	const heading = target === "terminal" ? "Close terminal window?" : "Close editor window?";
-	lines.push(`  ${BOLD}${COLORS.waiting} ${heading}${RESET}`);
+	lines.push(`  ${BOLD}${COLORS.waiting} Close editor window?${RESET}`);
 	lines.push(`  ${COLORS.subtitle}Session and worktree will be kept${RESET}`);
 	lines.push("");
 	lines.push(`  ${COLORS.muted}Enter: close | Esc: cancel${RESET}`);
-
 	return lines;
 }
 
-function renderWindowOpenConfirm(kind: WindowOpenConfirm["kind"]): string[] {
+function renderWindowOpenConfirm(): string[] {
 	const lines: string[] = [];
-
-	const heading = kind === "terminal" ? "Open terminal window?" : "Open editor window?";
-	lines.push(`  ${BOLD}${COLORS.waiting} ${heading}${RESET}`);
+	lines.push(`  ${BOLD}${COLORS.waiting} Open editor window?${RESET}`);
 	lines.push("");
 	lines.push(`  ${COLORS.muted}Enter: open | Esc: cancel${RESET}`);
-
 	return lines;
 }
 
@@ -204,13 +198,12 @@ function renderCard(
 	const topBorder = `${dimAll}${borderColor}${BOX.topLeft}${BOX.horizontal.repeat(width - 2)}${BOX.topRight}${RESET}`;
 	lines.push(topBorder);
 
-	// Title line: #N + spinner (while launching) + icon + repo:branch, with a
-	// dim ` terminal` suffix on terminal cards, and an elapsed-time stamp (plus a
-	// \u25b8 chevron when selected) right-aligned at the far edge.
+	// Title line: #N + spinner (while launching) + icon + repo:branch, and an
+	// elapsed-time stamp (plus a \u25b8 chevron when selected) right-aligned at
+	// the far edge.
 	const icon = "\uf418";
 	const sessionNum = `${COLORS.muted}#${sessionIndex + 1}${RESET} `;
-	const kindTag = session.kind === "terminal" ? `${DIM} terminal${RESET}` : "";
-	const titleText = `${titleColor}${icon} ${session.repoName}:${session.branch}${RESET}${kindTag}`;
+	const titleText = `${titleColor}${icon} ${session.repoName}:${session.branch}${RESET}`;
 	const titleLeft = `${sessionNum}${openDot}${titleText}`;
 
 	// Right stamp: most-recent agent update, else the session's own activity time.
@@ -309,7 +302,7 @@ function renderCard(
 
 	// Window close confirmation inline
 	if (isSelected && windowCloseConfirm && windowCloseConfirm.sessionId === session.id) {
-		const confirmLines = renderWindowCloseConfirm(windowCloseConfirm.target);
+		const confirmLines = renderWindowCloseConfirm();
 		for (const cl of confirmLines) {
 			const confirmLine = boxLine(cl, width, borderColor, dimAll);
 			lines.push(confirmLine);
@@ -318,7 +311,7 @@ function renderCard(
 
 	// Window open confirmation inline (accidental-click guard)
 	if (isSelected && windowOpenConfirm && windowOpenConfirm.sessionId === session.id) {
-		for (const cl of renderWindowOpenConfirm(windowOpenConfirm.kind)) {
+		for (const cl of renderWindowOpenConfirm()) {
 			lines.push(boxLine(cl, width, borderColor, dimAll));
 		}
 	}
@@ -390,6 +383,7 @@ function renderFooter(cols: number): string[] {
 		`${BOLD}d${RESET} del`,
 		`${BOLD}w${RESET} close`,
 		`${BOLD}r${RESET} realign`,
+		`${BOLD}t${RESET} term`,
 	].join(`${COLORS.muted} | ${RESET}`);
 	const line2 = [`${BOLD}c${RESET} compact`, `${BOLD}l${RESET} log`, `${BOLD}q${RESET} quit`].join(
 		`${COLORS.muted} | ${RESET}`,

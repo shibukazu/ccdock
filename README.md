@@ -24,7 +24,7 @@ ccdock sits in a narrow terminal sidebar and takes care of the rest: auto-positi
 
 ## Features
 
-- **VS Code + terminal orchestration** — Auto-open, position, and switch VS Code (or Cursor) windows and Ghostty terminals next to the sidebar. Each session manages a single window; pick "Editor" or "Terminal" when creating it. Clicking a session whose window is open snaps it straight into focus; clicking one whose window is closed asks for confirmation first (guarding against accidental opens).
+- **VS Code orchestration** — Auto-open, position, and switch VS Code (or Cursor) windows next to the sidebar. Each session manages its own editor window. Clicking a session whose window is open snaps it straight into focus; clicking one whose window is closed asks for confirmation first (guarding against accidental opens).
 - **Real-time agent monitoring** — See exactly what each Claude Code agent is doing: which tool it's calling, what file it's reading, what command it's running.
 - **Git worktree management** — Create, switch, and delete worktrees via [git-wt](https://github.com/k1LoW/git-wt) integration. Each worktree gets its own session.
 - **Activity log** — Live feed of tool invocations with session numbers (#N) across all active agents.
@@ -171,24 +171,25 @@ ccdock help     # show help
 
 ### Keybindings
 
-| Key          | Action                                          |
-| ------------ | ----------------------------------------------- |
-| `j` / `k`   | Navigate between sessions                        |
-| `Enter`      | Focus the session's window (editor or terminal)  |
-| `Tab`        | Focus the session's window (same as Enter)       |
-| `n`          | Create new session (interactive wizard)          |
-| `d`          | Delete session                                   |
-| `w`          | Close the session's window (with confirmation)   |
-| `r`          | Realign all editor + terminal windows            |
-| `c`          | Toggle compact mode                              |
-| `l`          | Toggle activity log                              |
-| `q` / Ctrl+C | Quit (with option to close windows)             |
-| Mouse click  | Focus the window if open, else confirm to open   |
-| Scroll wheel | Navigate between sessions                         |
+| Key          | Action                                                                                |
+| ------------ | -------------------------------------------------------------------------------------- |
+| `j` / `k`   | Navigate between sessions                                                              |
+| `Enter`      | Focus the session's editor window                                                     |
+| `Tab`        | Focus the session's editor window (same as Enter)                                     |
+| `n`          | Create new session (interactive wizard)                                               |
+| `d`          | Delete session                                                                         |
+| `w`          | Close the session's editor window                                                     |
+| `r`          | Realign all editor windows                                                            |
+| `t`          | Open a scratch Ghostty terminal at the workspace root (unmanaged — not tracked or positioned) |
+| `c`          | Toggle compact mode                                                                    |
+| `l`          | Toggle activity log                                                                    |
+| `q` / Ctrl+C | Quit (with option to close windows)                                                   |
+| Mouse click  | Focus the window if open, else confirm to open                                        |
+| Scroll wheel | Navigate between sessions                                                              |
 
 ### Session card states
 
-Each card manages one window — a VS Code editor or a Ghostty terminal, chosen in the wizard. Terminal cards carry a dim ` terminal` label after the repo:branch name; the border and spinner reflect that card's own window state.
+Each card manages a single VS Code (or Cursor) editor window for its worktree; the border and spinner reflect that window's state.
 
 | Card appearance | Meaning |
 | --------------- | ------- |
@@ -197,19 +198,11 @@ Each card manages one window — a VS Code editor or a Ghostty terminal, chosen 
 | Spinning `⠋` indicator | The card's window is launching |
 | Dim border | The card's window is closed |
 
-### Editor vs terminal sessions
+### Scratch terminals
 
-When you create a session (`n`), the final wizard step — **Open with** — asks whether to open an **Editor (VS Code)** or a **Terminal (Ghostty)**. This applies to all three creation paths: new worktree, existing worktree, and repository root.
+Pressing `t` opens a brand-new [Ghostty](https://ghostty.org/) window at the first configured `workspace_dirs` entry. This window is entirely unmanaged: ccdock does not track it, position it next to the sidebar, or close it — it behaves exactly like a terminal you opened yourself. Use it for one-off shell commands outside any specific session.
 
-- **Editor sessions** open (or focus) a VS Code/Cursor window for the worktree.
-- **Terminal sessions** open (or focus) a [Ghostty](https://ghostty.org/) terminal whose working directory is the worktree, managed next to the sidebar just like an editor (position, focus, close, realign).
-- The same worktree can have both an editor card and a terminal card; each manages its own window independently. Agent status is shown on every card for that worktree.
-
-Terminals are matched to worktrees by the shell's working directory, so same-named branches across different repositories never collide.
-
-- The first time ccdock scripts Ghostty, macOS shows an **Automation** permission prompt ("ccdock wants to control Ghostty"). Approve it (also under System Settings → Privacy & Security → Automation) so terminal management works.
-- ccdock captures its own Ghostty window at startup and never closes or repositions it — only worktree terminals are managed.
-- Ghostty must be installed and available as `com.mitchellh.ghostty`. If ccdock is launched from a different terminal, terminal management is disabled gracefully.
+ccdock also uses Ghostty for one other purpose unrelated to `t`: at startup it tags its own window with a unique title (via an OSC escape sequence) so it can reliably identify itself and position itself on screen. The first time ccdock scripts Ghostty for this, macOS shows an **Automation** permission prompt ("ccdock wants to control Ghostty") — approve it (also available under System Settings → Privacy & Security → Automation).
 
 ### Agent status
 
@@ -237,7 +230,7 @@ ccdock sidebar (polls every 2s) <----------+
 - **State** — `~/.local/state/ccdock/` stores session and agent state as JSON files
 - **Hooks** — `ccdock hook` writes agent state files when Claude Code fires events
 - **Window management** — AppleScript via `osascript` to position VS Code next to the sidebar
-- **Wizard** — `n` key scans workspace dirs, offers create/existing/root worktree options via `git wt`, then an "Open with" step to pick editor or terminal
+- **Wizard** — `n` key scans workspace dirs and offers create/existing/root worktree options via `git wt`, opening the repository's editor window directly on selection
 
 ### File structure
 
@@ -249,7 +242,7 @@ src/
   config/config.ts     — Config (~/.config/ccdock/)
   workspace/state.ts   — Session/agent state persistence
   workspace/editor.ts  — VS Code open/focus
-  workspace/terminal.ts— Ghostty terminal open/focus/close/reposition
+  workspace/terminal.ts— Ghostty self-identification (sidebar window) + scratch terminal launch
   workspace/window.ts  — AppleScript window management
   worktree/manager.ts  — Git worktree operations
   worktree/scanner.ts  — Repository discovery
